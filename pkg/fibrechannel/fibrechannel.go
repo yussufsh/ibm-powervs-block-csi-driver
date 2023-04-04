@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	"errors"
@@ -153,7 +155,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 			if len(c.TargetWWNs) != 0 {
 				disk, dm = findDisk(diskID, c.Lun, io)
 			} else {
-				disk, dm = findDiskWWIDs(diskID, io)
+				disk, dm = pollAndFindDiskWWIDs(diskID, io)
 			}
 			// if multipath device is found, break
 			if dm != "" {
@@ -186,6 +188,26 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	}
 
 	return disk, nil
+}
+func pollAndFindDiskWWIDs(wwid string, io ioHandler) (string, string) {
+	disk, dm := "", ""
+	err := wait.PollImmediate(3*time.Second, 5*time.Minute, func() (bool, error) {
+		disk, dm = findDiskWWIDs(wwid, io)
+		// if no disk matches then retry
+		if disk == "" && dm == "" {
+			return false, fmt.Errorf("no fc disk found")
+		}
+		// found the disk before timeout
+		if disk != "" {
+			return true, nil
+		}
+		// wait until timeout
+		return false, nil
+	})
+	if err == nil && disk == "" && dm == "" {
+		klog.Errorf("failed within timeout")
+	}
+	return disk, dm
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent

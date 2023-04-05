@@ -393,7 +393,7 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	if isBlock {
 		klog.V(5).Infof("isBlock is true for device: %s", dev)
-		err = cleanupDevice(dev)
+		// err = cleanupDevice(dev)
 	} else {
 		klog.V(5).Infof("isBlock is false for device: %s", dev)
 	}

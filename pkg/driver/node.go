@@ -230,40 +230,44 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
 		return nil, status.Error(codes.Internal, msg)
 	}
+	klog.V(5).Infof("NodeUnstageVolume: GetDeviceName returned device %s with %d references", dev, refCount)
 
 	// From the spec: If the volume corresponding to the volume_id
 	// is not staged to the staging_target_path, the Plugin MUST
 	// reply 0 OK.
 	if refCount == 0 {
 		klog.V(5).Infof("NodeUnstageVolume: %s target not mounted", target)
-		return &csi.NodeUnstageVolumeResponse{}, nil
+	} else {
+		if refCount > 1 {
+			klog.Warningf("NodeUnstageVolume: found %d references to device %s mounted at target path %s", refCount, dev, target)
+		}
+
+		klog.V(5).Infof("NodeUnstageVolume: unmounting %s", target)
+		err = d.mounter.Unmount(target)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not unmount target %q: %v", target, err)
+		}
+		klog.V(5).Infof("NodeUnstageVolume: unmounting %s completed", target)
 	}
 
-	if refCount > 1 {
-		klog.Warningf("NodeUnstageVolume: found %d references to device %s mounted at target path %s", refCount, dev, target)
-	}
-
-	klog.V(5).Infof("NodeUnstageVolume: unmounting %s", target)
-	err = d.mounter.Unmount(target)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount target %q: %v", target, err)
-	}
-	handler := &fibrechannel.OSioHandler{}
-	var mpath bool
-	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler); mdev != "" {
-		klog.V(5).Infof("Multipath device found: %s for %s", mdev, dev)
-		mpath = true
-		dev = mdev
-	}
-	klog.Infof("Detaching: %s", dev)
-	err = fibrechannel.Detach(dev, handler)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to detach %s: %v", dev, err)
-	}
-	if mpath {
-		klog.Infof("Deleting the multipath device: %s", dev)
-		if err := fibrechannel.RemoveMultipathDevice(dev); err != nil {
-			return nil, err
+	if dev != "" {
+		handler := &fibrechannel.OSioHandler{}
+		var mpath bool
+		if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler); mdev != "" {
+			klog.V(5).Infof("Multipath device found: %s for %s", mdev, dev)
+			mpath = true
+			dev = mdev
+		}
+		klog.Infof("Detaching: %s", dev)
+		err = fibrechannel.Detach(dev, handler)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to detach %s: %v", dev, err)
+		}
+		if mpath {
+			klog.Infof("Deleting the multipath device: %s", dev)
+			if err := fibrechannel.RemoveMultipathDevice(dev); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return &csi.NodeUnstageVolumeResponse{}, nil

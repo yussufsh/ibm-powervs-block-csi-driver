@@ -248,24 +248,12 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount target %q: %v", target, err)
 	}
-	handler := &fibrechannel.OSioHandler{}
-	var mpath bool
-	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler); mdev != "" {
-		klog.V(5).Infof("Multipath device found: %s for %s", mdev, dev)
-		mpath = true
-		dev = mdev
-	}
-	klog.Infof("Detaching: %s", dev)
-	err = fibrechannel.Detach(dev, handler)
+
+	err = cleanupDevice(dev)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to detach %s: %v", dev, err)
+		return nil, err
 	}
-	if mpath {
-		klog.Infof("Deleting the multipath device: %s", dev)
-		if err := fibrechannel.RemoveMultipathDevice(dev); err != nil {
-			return nil, err
-		}
-	}
+
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
@@ -373,10 +361,45 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	}
 	defer d.volumeLocks.Release(target)
 
+	// Check if target directory is a mount point
+	// returns the device name, reference count, and error code
+	dev, refCount, err := d.mounter.GetDeviceName(target)
+	if err != nil {
+		msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
+		return nil, status.Error(codes.Internal, msg)
+	}
+
+	klog.V(5).Infof("NodeUnpublishVolume device name is: %s", dev)
+
+	isBlock := false
+	// From the spec: If the volume corresponding to the volume_id
+	// is not staged to the staging_target_path, the Plugin MUST
+	// reply 0 OK.
+	if refCount == 0 {
+		klog.V(5).Infof("NodeUnpublishVolume: %s target not mounted", target)
+		return &csi.NodeUnpublishVolumeResponse{}, nil
+	}
+
+	if refCount > 1 {
+		klog.Warningf("NodeUnpublishVolume: found %d references to device %s mounted at target path %s", refCount, dev, target)
+		isBlock, _ = d.stats.IsBlockDevice(dev)
+	}
+
 	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err := d.mounter.Unmount(target)
+	err = d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+	}
+
+	if isBlock {
+		klog.V(5).Infof("isBlock is true for device: %s", dev)
+		err = cleanupDevice(dev)
+	} else {
+		klog.V(5).Infof("isBlock is false for device: %s", dev)
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -612,4 +635,28 @@ func (d *nodeService) isDirMounted(target string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// cleanupDevice remove the device path
+func cleanupDevice(dev string) error {
+	klog.V(5).Infof("running cleanupDevice with device: %s", dev)
+	handler := &fibrechannel.OSioHandler{}
+	var mpath bool
+	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler); mdev != "" {
+		klog.V(5).Infof("Multipath device found: %s for %s", mdev, dev)
+		mpath = true
+		dev = mdev
+	}
+	klog.Infof("Detaching: %s", dev)
+	err := fibrechannel.Detach(dev, handler)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to detach %s: %v", dev, err)
+	}
+	if mpath {
+		klog.Infof("Deleting the multipath device: %s", dev)
+		if err := fibrechannel.RemoveMultipathDevice(dev); err != nil {
+			return err
+		}
+	}
+	return nil
 }

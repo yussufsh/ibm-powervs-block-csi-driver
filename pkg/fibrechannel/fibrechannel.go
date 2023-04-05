@@ -153,12 +153,15 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 
 		for _, diskID := range diskIds {
 			if !rescaned {
+				klog.Info("fb: scanning disk the first time")
 				if len(c.TargetWWNs) != 0 {
 					disk, dm = findDisk(diskID, c.Lun, io)
 				} else {
 					disk, dm = findDiskWWIDs(diskID, io)
 				}
+				klog.Info("fb: after scanning disk the first time: %s %s", disk, dm)
 			} else {
+				klog.Info("fb: rescan disk the with polling")
 				err := wait.PollImmediate(3*time.Second, 5*time.Minute, func() (bool, error) {
 					if len(c.TargetWWNs) != 0 {
 						disk, dm = findDisk(diskID, c.Lun, io)
@@ -167,10 +170,12 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 					}
 					// if no disk matches then retry
 					if disk == "" && dm == "" {
+						klog.Info("fb: rescan disk the with polling [EMPTY]: %s %s", disk, dm)
 						return false, fmt.Errorf("no fc disk found")
 					}
 					// found the disk before timeout
 					if disk != "" {
+						klog.Info("fb: rescan disk the with polling [FOUND]: %s %s", disk, dm)
 						return true, nil
 					}
 					// wait until timeout

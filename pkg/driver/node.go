@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	mountutils "k8s.io/mount-utils"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/cloud"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
@@ -363,26 +364,16 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	// Check if target directory is a mount point
 	// returns the device name, reference count, and error code
-	dev, refCount, err := d.mounter.GetDeviceName(target)
+	dev, _, err := d.mounter.GetDeviceName(target)
 	if err != nil {
 		msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
 		return nil, status.Error(codes.Internal, msg)
 	}
-
 	klog.V(5).Infof("NodeUnpublishVolume device name is: %s", dev)
 
-	isBlock := false
-	// From the spec: If the volume corresponding to the volume_id
-	// is not staged to the staging_target_path, the Plugin MUST
-	// reply 0 OK.
-	if refCount == 0 {
-		klog.V(5).Infof("NodeUnpublishVolume: %s target not mounted", target)
-		return &csi.NodeUnpublishVolumeResponse{}, nil
-	}
-
-	if refCount > 1 {
-		klog.Warningf("NodeUnpublishVolume: found %d references to device %s mounted at target path %s", refCount, dev, target)
-		isBlock, _ = d.stats.IsBlockDevice(dev)
+	isBlock, err := hostutil.NewHostUtil().PathIsDevice(target)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "failed to determine device type for path [%s]: %v", target, err)
 	}
 
 	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
@@ -393,7 +384,7 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	if isBlock {
 		klog.V(5).Infof("isBlock is true for device: %s", dev)
-		// err = cleanupDevice(dev)
+		err = cleanupDevice(dev)
 	} else {
 		klog.V(5).Infof("isBlock is false for device: %s", dev)
 	}

@@ -171,7 +171,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 					// if no disk matches then retry
 					if disk == "" && dm == "" {
 						klog.Info("fb: rescan disk the with polling [EMPTY]: %s %s", disk, dm)
-						return false, fmt.Errorf("no fc disk found")
+						return false, nil
 					}
 					// found the disk before timeout
 					if disk != "" {

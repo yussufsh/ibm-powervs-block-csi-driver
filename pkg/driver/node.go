@@ -238,6 +238,20 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	// reply 0 OK.
 	if refCount == 0 {
 		klog.V(5).Infof("NodeUnstageVolume: %s target not mounted", target)
+
+		// Fix: clean up block device
+		devicePath := d.lookupForBlockVolumeDevice(volumeID)
+		if devicePath != "" {
+			klog.V(5).Infof("lookupForBlockVolumeDevice is true for volume : %s and device: %s", volumeID, devicePath)
+			err = cleanupDevice(devicePath)
+		} else {
+			klog.V(5).Infof("lookupForBlockVolumeDevice is false for volume : %s and device: %s", volumeID, devicePath)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
@@ -381,19 +395,6 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	err := d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
-	}
-
-	// clean up device path
-	devicePath := d.lookupForBlockVolumeDevice(volumeID)
-	if devicePath != "" {
-		klog.V(5).Infof("lookupForBlockVolumeDevice is true for volume : %s and device: %s", volumeID, devicePath)
-		err = cleanupDevice(devicePath)
-	} else {
-		klog.V(5).Infof("lookupForBlockVolumeDevice is false for volume : %s and device: %s", volumeID, devicePath)
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil

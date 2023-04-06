@@ -27,7 +27,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	mountutils "k8s.io/mount-utils"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/cloud"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
@@ -63,12 +62,13 @@ var (
 
 // nodeService represents the node service of CSI driver
 type nodeService struct {
-	cloud         cloud.Cloud
-	mounter       Mounter
-	driverOptions *Options
-	pvmInstanceId string
-	volumeLocks   *util.VolumeLocks
-	stats         StatsUtils
+	cloud              cloud.Cloud
+	mounter            Mounter
+	driverOptions      *Options
+	pvmInstanceId      string
+	volumeLocks        *util.VolumeLocks
+	stats              StatsUtils
+	blockVolumeDevices map[string]string
 }
 
 // newNodeService creates a new node service
@@ -86,12 +86,13 @@ func newNodeService(driverOptions *Options) nodeService {
 	}
 
 	return nodeService{
-		cloud:         pvsCloud,
-		mounter:       newNodeMounter(),
-		driverOptions: driverOptions,
-		pvmInstanceId: metadata.GetPvmInstanceId(),
-		volumeLocks:   util.NewVolumeLocks(),
-		stats:         &VolumeStatUtils{},
+		cloud:              pvsCloud,
+		mounter:            newNodeMounter(),
+		driverOptions:      driverOptions,
+		pvmInstanceId:      metadata.GetPvmInstanceId(),
+		volumeLocks:        util.NewVolumeLocks(),
+		stats:              &VolumeStatUtils{},
+		blockVolumeDevices: make(map[string]string),
 	}
 }
 
@@ -364,29 +365,31 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	// Check if target directory is a mount point
 	// returns the device name, reference count, and error code
-	dev, _, err := d.mounter.GetDeviceName(target)
-	if err != nil {
-		msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
-		return nil, status.Error(codes.Internal, msg)
-	}
-	klog.V(5).Infof("NodeUnpublishVolume device name is: %s", dev)
+	// dev, _, err := d.mounter.GetDeviceName(target)
+	// if err != nil {
+	// 	msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
+	// 	return nil, status.Error(codes.Internal, msg)
+	// }
+	// klog.V(5).Infof("NodeUnpublishVolume device name is: %s", dev)
 
-	isBlock, err := hostutil.NewHostUtil().PathIsDevice(target)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "failed to determine device type for path [%s]: %v", target, err)
-	}
+	// isBlock, err := hostutil.NewHostUtil().PathIsDevice(target)
+	// if err != nil {
+	// 	return nil, status.Errorf(codes.NotFound, "failed to determine device type for path [%s]: %v", target, err)
+	// }
 
 	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
-	err = d.mounter.Unmount(target)
+	err := d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
 	}
 
-	if isBlock {
-		klog.V(5).Infof("isBlock is true for device: %s", dev)
-		err = cleanupDevice(dev)
+	// clean up device path
+	devicePath := d.lookupForBlockVolumeDevice(volumeID)
+	if devicePath != "" {
+		klog.V(5).Infof("lookupForBlockVolumeDevice is true for volume : %s and device: %s", volumeID, devicePath)
+		err = cleanupDevice(devicePath)
 	} else {
-		klog.V(5).Infof("isBlock is false for device: %s", dev)
+		klog.V(5).Infof("lookupForBlockVolumeDevice is false for volume : %s and device: %s", volumeID, devicePath)
 	}
 
 	if err != nil {
@@ -394,6 +397,15 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (d *nodeService) lookupForBlockVolumeDevice(vol string) string {
+	dev, ok := d.blockVolumeDevices[vol]
+	if ok {
+		delete(d.blockVolumeDevices, vol)
+		return dev
+	}
+	return dev
 }
 
 func (d *nodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
@@ -511,7 +523,7 @@ func (d *nodeService) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoReque
 
 func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeRequest, mountOptions []string) error {
 	target := req.GetTargetPath()
-	//volumeID := req.GetVolumeId()
+	volumeID := req.GetVolumeId()
 
 	wwn, exists := req.PublishContext[WWNKey]
 	if !exists {
@@ -556,6 +568,10 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 		}
 		return status.Errorf(codes.Internal, "Could not mount %q at %q: %v", source, target, err)
 	}
+
+	// FIX: storage the block devices in a map to clean up during UnpublishVolume.
+	klog.V(5).Infof("NodePublishVolume [block]: storing device %s for volume %s into blockVolumeDevices", source, volumeID)
+	d.blockVolumeDevices[volumeID] = source
 
 	return nil
 }

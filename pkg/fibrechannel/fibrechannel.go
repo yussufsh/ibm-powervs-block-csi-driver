@@ -75,6 +75,12 @@ func FindMultipathDeviceForDevice(device string, io ioHandler) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	if strings.HasPrefix(disk, "dm-") {
+		klog.Info("fb: FindMultipathDeviceForDevice: device itself is dm")
+		return device, nil
+	}
+
 	sysPath := "/sys/block/"
 	if dirs, err2 := io.ReadDir(sysPath); err2 == nil {
 		for _, f := range dirs {

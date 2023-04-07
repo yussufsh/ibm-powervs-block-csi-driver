@@ -141,69 +141,60 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 
 	if len(c.TargetWWNs) != 0 {
 		diskIds = c.TargetWWNs
+		klog.Infof("[DEBUG] TargetWWNs with diskIds: %+v", diskIds)
 	} else {
 		diskIds = c.WWIDs
+		klog.Infof("[DEBUG] TargetWWID with diskIds: %+v", diskIds)
 	}
 
 	rescaned := false
 	// two-phase search:
 	// first phase, search existing device path, if a multipath dm is found, exit loop
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
-	for {
-
-		for _, diskID := range diskIds {
-			if !rescaned {
-				klog.Info("fb: scanning disk the first time")
-				if len(c.TargetWWNs) != 0 {
-					disk, dm = findDisk(diskID, c.Lun, io)
-				} else {
-					disk, dm = findDiskWWIDs(diskID, io)
-				}
-				klog.Info("fb: after scanning disk the first time: %s %s", disk, dm)
+	for _, diskID := range diskIds {
+		klog.Info("fb: rescan disk with polling")
+		err := wait.PollImmediate(1*time.Second, 2*time.Minute, func() (bool, error) {
+			if len(c.TargetWWNs) != 0 {
+				disk, dm = findDisk(diskID, c.Lun, io)
 			} else {
-				klog.Info("fb: rescan disk the with polling")
-				err := wait.PollImmediate(3*time.Second, 5*time.Minute, func() (bool, error) {
-					if len(c.TargetWWNs) != 0 {
-						disk, dm = findDisk(diskID, c.Lun, io)
-					} else {
-						disk, dm = findDiskWWIDs(diskID, io)
-					}
-					// if no disk matches then retry
-					if disk == "" && dm == "" {
-						klog.Info("fb: rescan disk the with polling [EMPTY]: %s %s", disk, dm)
-						return false, nil
-					}
-					// found the disk before timeout
-					if disk != "" {
-						klog.Info("fb: rescan disk the with polling [FOUND]: %s %s", disk, dm)
-						return true, nil
-					}
-					// wait until timeout
-					return false, nil
-				})
-				if err == nil && disk == "" && dm == "" {
-					klog.Errorf("failed within timeout")
+				disk, dm = findDiskWWIDs(diskID, io)
+			}
+
+			// found the disk before timeout
+			if dm != "" {
+				klog.Infof("fb: rescan disk with polling [FOUND] disk: %s dm: %s", disk, dm)
+				return true, nil
+			} else if disk != "" {
+				// FIXME: this is only to test dm path; so we are not returning
+				klog.Infof("fb: rescan disk with polling [FOUND] disk: %s", disk)
+			} else {
+				// if no disk matches then retry
+				klog.Info("fb: rescan disk with polling [EMPTY]")
+			}
+
+			if !rescaned {
+				err := scsiHostRescan(io)
+				rescaned = true
+				if err != nil {
+					return false, err
 				}
 			}
-			// if multipath device is found, break
-			if dm != "" {
 
-				break
-			}
+			// wait until timeout
+			return false, nil
+		})
+		if err != nil {
+			klog.Errorf("failed within timeout %v", err)
+			return "", fmt.Errorf("failed within timeout %v", err)
 		}
-		// if a dm is found, exit loop
-		if rescaned || dm != "" {
+		if err == nil && disk == "" && dm == "" {
+			klog.Errorf("failed within timeout")
+		}
+		// if multipath device is found, break
+		if dm != "" {
 			break
 		}
-		// rescan and search again
-		// rescan scsi bus
 
-		err := scsiHostRescan(io)
-		if err != nil {
-			return "", err
-		}
-		//fcHostIssueLip(io)
-		rescaned = true
 	}
 	// if no disk matches input wwn and lun, exit
 	if disk == "" && dm == "" {
@@ -215,7 +206,8 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 		return dm, nil
 	}
 
-	return disk, nil
+	// FIXME: this is only to test dm path; so we are not returning for disk only
+	return "", fmt.Errorf("no fc disk found : no multipath disk found")
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent

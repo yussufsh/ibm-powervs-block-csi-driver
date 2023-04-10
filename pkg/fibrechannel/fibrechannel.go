@@ -371,11 +371,17 @@ func removeFromScsiSubsystem(deviceName string, io ioHandler) error {
 }
 
 func RemoveMultipathDevice(device string) error {
-	cmd := exec.Command("multipath", "-f", device)
-	stdoutStderr, err := cmd.CombinedOutput()
+	stdoutStderr, err := exec.Command("multipath", "-F").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed remove multipath device: %s err: %v", device, err)
+		return fmt.Errorf("failed remove multipath devices: %s err: %v", device, err)
 	}
-	klog.Infof("output of multipath device remove command: %s", stdoutStderr)
+	klog.Infof("output of remove multipath devices command: %s", stdoutStderr)
 	return nil
+	// cmd := exec.Command("multipath", "-f", device)
+	// stdoutStderr, err := cmd.CombinedOutput()
+	// if err != nil {
+	// 	return fmt.Errorf("failed remove multipath device: %s err: %v", device, err)
+	// }
+	// klog.Infof("output of multipath device remove command: %s", stdoutStderr)
+	// return nil
 }

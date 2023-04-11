@@ -70,14 +70,14 @@ func (handler *OSioHandler) WriteFile(filename string, data []byte, perm os.File
 }
 
 // FindMultipathDeviceForDevice given a device name like /dev/sdx, find the devicemapper parent
-func FindMultipathDeviceForDevice(device string, io ioHandler, symlink string) (string, error) {
+func FindMultipathDeviceForDevice(device string, io ioHandler, vol string) (string, error) {
 	disk, err := findDeviceForPath(device, io)
 	if err != nil {
 		return "", err
 	}
 
 	if strings.HasPrefix(disk, "dm-") {
-		klog.Info("fb: FindMultipathDeviceForDevice from symlink: %s device: %s dstPath: %s itself is dm", symlink, device, disk)
+		klog.Info("fb: FindMultipathDeviceForDevice from vol: %s device: %s dstPath: %s itself is dm", vol, device, disk)
 		return "/dev/" + disk, nil
 	}
 
@@ -158,26 +158,8 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	// first phase, search existing device path, if a multipath dm is found, exit loop
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
 	for _, diskID := range diskIds {
-		klog.Infof("fb: starting to rescan disk with polling %s", diskID)
+		klog.Infof("fb: starting to rescan disk with polling %s", c.VolumeName)
 		err := wait.PollImmediate(2*time.Second, 2*time.Minute, func() (bool, error) {
-			if len(c.TargetWWNs) != 0 {
-				disk, dm = findDisk(diskID, c.Lun, io)
-			} else {
-				disk, dm = findDiskWWIDs(diskID, io)
-			}
-
-			// found the disk before timeout
-			if dm != "" {
-				klog.Infof("fb: rescan disk with polling wwn: %s disk: %s dm: %s", diskID, disk, dm)
-				return true, nil
-			} else if disk != "" {
-				// FIXME: this is only to test dm path; so we are not returning
-				klog.Infof("fb: rescan disk with polling wwn: %s disk: %s", diskID, disk)
-			} else {
-				// if no disk matches then retry
-				klog.Infof("fb: rescan disk with polling wwn: %s [EMPTY]", diskID)
-			}
-
 			if !rescaned {
 				err := scsiHostRescan(io)
 				if err != nil {
@@ -186,15 +168,33 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 				rescaned = true
 			}
 
+			if len(c.TargetWWNs) != 0 {
+				disk, dm = findDisk(diskID, c.Lun, io)
+			} else {
+				disk, dm = findDiskWWIDs(diskID, c.VolumeName, io)
+			}
+
+			// found the disk before timeout
+			if dm != "" {
+				klog.Infof("fb: rescan disk with polling vol: %s disk: %s dm: %s", c.VolumeName, disk, dm)
+				return true, nil
+			} else if disk != "" {
+				// FIXME: this is only to test dm path; so we are not returning
+				klog.Infof("fb: rescan disk with polling vol: %s disk: %s", c.VolumeName, disk)
+			} else {
+				// if no disk matches then retry
+				klog.Infof("fb: rescan disk with polling vol: %s [EMPTY]", c.VolumeName)
+			}
+
 			// wait until timeout
 			return false, nil
 		})
 		if err != nil {
-			klog.Errorf("failed within timeout wwn: %s err: %v", diskID, err)
-			return "", fmt.Errorf("failed within timeout wwn: %s err: %v", diskID, err)
+			klog.Errorf("failed within timeout vol: %s err: %v", c.VolumeName, err)
+			return "", fmt.Errorf("failed within timeout vol: %s err: %v", c.VolumeName, err)
 		}
 		if err == nil && disk == "" && dm == "" {
-			klog.Errorf("failed within timeout: no fc disk found for wwn: %s", diskID)
+			klog.Errorf("failed within timeout: no fc disk found for vol: %s", c.VolumeName)
 		}
 		// if multipath device is found, break
 		if dm != "" {
@@ -204,7 +204,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	}
 
 	// FIXME: this is only to test dm path; so we are not returning for disk only
-	return "", fmt.Errorf("no fc disk found : no multipath disk found for wwn: %v", diskIds)
+	return "", fmt.Errorf("no fc disk found : no multipath disk found for vol: %v", c.VolumeName)
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent
@@ -227,7 +227,7 @@ func findDisk(wwn, lun string, io ioHandler) (string, string) {
 }
 
 // given a wwid, find the device and associated devicemapper parent
-func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
+func findDiskWWIDs(wwid, vol string, io ioHandler) (string, string) {
 	// Example wwid format:
 	//   3600508b400105e210000900000490000
 	//   <VENDOR NAME> <IDENTIFIER NUMBER>
@@ -245,12 +245,12 @@ func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 			if name == FcPath {
 				disk, err := io.EvalSymlinks(DevID + name)
 				if err != nil {
-					klog.Errorf("fc: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
+					klog.Errorf("fc: failed to find a corresponding disk from vol %s, symlink[%s], error %v", vol, DevID+name, err)
 					return "", ""
 				}
 				dm, err1 := FindMultipathDeviceForDevice(disk, io, DevID+name)
 				if err1 != nil {
-					klog.Errorf("fc: failed to find a multipath disk from symlink[%s], for %s, error %v", DevID+name, disk, err)
+					klog.Errorf("fc: failed to find a multipath disk from vol %s, symlink[%s], for %s, error %v", vol, DevID+name, disk, err)
 					return disk, ""
 				}
 				return disk, dm

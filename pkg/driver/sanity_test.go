@@ -360,6 +360,6 @@ func (f *fakeMounter) GetDeviceName(mountPath string) (string, int, error) {
 	return mount.GetDeviceNameFromMount(f, mountPath)
 }
 
-func (f *fakeMounter) GetDevicePath(wwn string) (devicePath string, err error) {
+func (f *fakeMounter) GetDevicePath(wwn, vol string) (devicePath string, err error) {
 	return wwn, nil
 }

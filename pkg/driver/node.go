@@ -169,17 +169,17 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Error(codes.InvalidArgument, "WWN ID is not provided or empty")
 	}
 
-	source, err := d.mounter.GetDevicePath(wwn)
+	source, err := d.mounter.GetDevicePath(wwn, volumeID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to find device path %s. %v", wwn, err)
+		return nil, status.Errorf(codes.Internal, "Failed to find device path %s. %v", volumeID, err)
 	}
 
-	klog.V(4).Infof("NodeStageVolume: find device path for wwn %s -> %s", wwn, source)
+	klog.V(4).Infof("NodeStageVolume: find device path for vol %s -> %s", volumeID, source)
 
 	// Check if a device is mounted in target directory
 	device, _, err := d.mounter.GetDeviceName(target)
 	if err != nil {
-		msg := fmt.Sprintf("failed to check if volume is already mounted: %v for wwn %s", err, wwn)
+		msg := fmt.Sprintf("failed to check if volume is already mounted: %v for vol %s", err, volumeID)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
@@ -192,13 +192,17 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 
 	// FormatAndMount will format only if needed
-	klog.V(5).Infof("NodeStageVolume: starting formatting %s and mounting at %s with fstype %s for wwn %s", source, target, fsType, wwn)
+	klog.V(5).Infof("NodeStageVolume: starting formatting %s and mounting at %s with fstype %s for vol %s", source, target, fsType, volumeID)
 	err = d.mounter.FormatAndMount(source, target, fsType, mountOptions)
 	if err != nil {
-		msg := fmt.Sprintf("could not format %q and mnt it at %q for wwn %s", source, target, wwn)
+		msg := fmt.Sprintf("could not format %q and mnt it at %q for vol %s", source, target, volumeID)
 		return nil, status.Error(codes.Internal, msg)
 	}
-	klog.V(5).Infof("NodeStageVolume: completed formatting %s and mounting at %s with fstype %s for wwn %s", source, target, fsType, wwn)
+	klog.V(5).Infof("NodeStageVolume: completed formatting %s and mounting at %s with fstype %s for vol %s", source, target, fsType, volumeID)
+
+	// FIX: storage the block devices in a map to clean up during UnpublishVolume.
+	klog.V(5).Infof("NodePublishVolume: storing device %s into blockVolumeDevices for vol %s", source, volumeID)
+	d.blockVolumeDevices[volumeID] = source
 
 	return &csi.NodeStageVolumeResponse{}, nil
 }
@@ -255,12 +259,19 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		klog.Warningf("NodeUnstageVolume: found %d references to device %s mounted at target path %s for vol %s", refCount, dev, target, volumeID)
 	}
 
-	klog.V(5).Infof("NodeUnstageVolume: unmounting %s for vol %s", target, volumeID)
+	klog.V(5).Infof("NodeUnstageVolume: starting unmounting %s for vol %s", target, volumeID)
 	err = d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount for vol %s target %q: %v", volumeID, target, err)
 	}
+	klog.V(5).Infof("NodeUnstageVolume: completed unmounting %s for vol %s", target, volumeID)
 
+	deviceFromMap := d.lookupForBlockVolumeDevice(volumeID)
+	if deviceFromMap == dev {
+		klog.V(5).Infof("found xfs device in map")
+	} else {
+		klog.V(5).Infof("did not find xfs device in map")
+	}
 	err = cleanupDevice(dev, volumeID)
 	if err != nil {
 		return nil, err
@@ -392,6 +403,7 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount %q for vol %s volumeID: %v", target, volumeID, err)
 	}
+	klog.V(5).Infof("NodeUnpublishVolume: completed unmounting %s for vol %s", target, volumeID)
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
@@ -527,12 +539,12 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 	if !exists {
 		return status.Error(codes.InvalidArgument, "WWN ID not provided")
 	}
-	source, err := d.mounter.GetDevicePath(wwn)
+	source, err := d.mounter.GetDevicePath(wwn, volumeID)
 	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to find device path for wwn %s. %v", wwn, err)
+		return status.Errorf(codes.Internal, "Failed to find device path for vol %s. %v", volumeID, err)
 	}
 
-	klog.V(4).Infof("NodePublishVolume [block]: find device path for wwn %s -> %s", wwn, source)
+	klog.V(4).Infof("NodePublishVolume [block]: find device path for vol %s -> %s", volumeID, source)
 
 	globalMountPath := filepath.Dir(target)
 
@@ -540,35 +552,35 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 	// Path in the form of /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices/publish/{volumeName}
 	exists, err = d.mounter.ExistsPath(globalMountPath)
 	if err != nil {
-		return status.Errorf(codes.Internal, "Could not check if path exists %q for wwn %s: %v", globalMountPath, wwn, err)
+		return status.Errorf(codes.Internal, "Could not check if path exists %q for vol %s: %v", globalMountPath, volumeID, err)
 	}
 
 	if !exists {
 		if err = d.mounter.MakeDir(globalMountPath); err != nil {
-			return status.Errorf(codes.Internal, "Could not create dir %q for wwn %s: %v", globalMountPath, wwn, err)
+			return status.Errorf(codes.Internal, "Could not create dir %q for vol %s: %v", globalMountPath, volumeID, err)
 		}
 	}
 
 	// Create the mount point as a file since bind mount device node requires it to be a file
-	klog.V(5).Infof("NodePublishVolume [block]: making target file %s for wwn %s", target, wwn)
+	klog.V(5).Infof("NodePublishVolume [block]: making target file %s for vol %s", target, volumeID)
 	err = d.mounter.MakeFile(target)
 	if err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, removeErr)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for vol %s: %v", target, volumeID, removeErr)
 		}
-		return status.Errorf(codes.Internal, "Could not create file %q for wwn %s: %v", target, wwn, err)
+		return status.Errorf(codes.Internal, "Could not create file %q for vol %s: %v", target, volumeID, err)
 	}
 
-	klog.V(5).Infof("NodePublishVolume [block]: mounting %s at %s for wwn %s", source, target, wwn)
+	klog.V(5).Infof("NodePublishVolume [block]: mounting %s at %s for vol %s", source, target, volumeID)
 	if err := d.mounter.Mount(source, target, "", mountOptions); err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, removeErr)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for vol %s: %v", target, volumeID, removeErr)
 		}
-		return status.Errorf(codes.Internal, "Could not mount %q at %q for wwn %s: %v", source, target, wwn, err)
+		return status.Errorf(codes.Internal, "Could not mount %q at %q for vol %s: %v", source, target, volumeID, err)
 	}
 
 	// FIX: storage the block devices in a map to clean up during UnpublishVolume.
-	klog.V(5).Infof("NodePublishVolume [block]: storing device %s for volume %s into blockVolumeDevices for wwn %s", source, volumeID, wwn)
+	klog.V(5).Infof("NodePublishVolume [block]: storing device %s into blockVolumeDevices for vol %s", source, volumeID)
 	d.blockVolumeDevices[volumeID] = source
 
 	return nil
@@ -577,10 +589,7 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeRequest, mountOptions []string, mode *csi.VolumeCapability_Mount) error {
 	target := req.GetTargetPath()
 	source := req.GetStagingTargetPath()
-	wwn, exists := req.PublishContext[WWNKey]
-	if !exists {
-		return status.Error(codes.InvalidArgument, "WWN ID not provided")
-	}
+	volumeID := req.VolumeId
 
 	if m := mode.Mount; m != nil {
 		for _, f := range m.MountFlags {
@@ -590,9 +599,9 @@ func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeR
 		}
 	}
 
-	klog.V(5).Infof("NodePublishVolume: creating dir %s for wwn %s", target, wwn)
+	klog.V(5).Infof("NodePublishVolume: creating dir %s for vol %s", target, volumeID)
 	if err := d.mounter.MakeDir(target); err != nil {
-		return status.Errorf(codes.Internal, "Could not create dir %q for wwn %s: %v", target, wwn, err)
+		return status.Errorf(codes.Internal, "Could not create dir %q for vol %s: %v", target, volumeID, err)
 	}
 
 	fsType := mode.Mount.GetFsType()
@@ -600,14 +609,14 @@ func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeR
 		fsType = defaultFsType
 	}
 
-	klog.V(5).Infof("NodePublishVolume: started mounting %s at %s with option %s as fstype %s for wwn %s", source, target, mountOptions, fsType, wwn)
+	klog.V(5).Infof("NodePublishVolume: started mounting %s at %s with option %s as fstype %s for vol %s", source, target, mountOptions, fsType, volumeID)
 	if err := d.mounter.Mount(source, target, fsType, mountOptions); err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, err)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for vol %s: %v", target, volumeID, err)
 		}
-		return status.Errorf(codes.Internal, "Could not mount %q at %q for wwn %s: %v", source, target, wwn, err)
+		return status.Errorf(codes.Internal, "Could not mount %q at %q for vol %s: %v", source, target, volumeID, err)
 	}
-	klog.V(5).Infof("NodePublishVolume: completed mounting %s at %s with option %s as fstype %s for wwn %s", source, target, mountOptions, fsType, wwn)
+	klog.V(5).Infof("NodePublishVolume: completed mounting %s at %s with option %s as fstype %s for vol %s", source, target, mountOptions, fsType, volumeID)
 
 	return nil
 }

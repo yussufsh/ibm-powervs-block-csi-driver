@@ -120,7 +120,7 @@ func (mr *MockMounterMockRecorder) GetDeviceName(mountPath interface{}) *gomock.
 }
 
 // GetDevicePath mocks base method.
-func (m *MockMounter) GetDevicePath(wwn string) (string, error) {
+func (m *MockMounter) GetDevicePath(wwn, vol string) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetDevicePath", wwn)
 	ret0, _ := ret[0].(string)

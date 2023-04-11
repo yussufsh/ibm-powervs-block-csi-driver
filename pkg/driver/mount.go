@@ -37,7 +37,7 @@ type Mounter interface {
 	MakeDir(pathname string) error
 	ExistsPath(filename string) (bool, error)
 	RescanSCSIBus() error
-	GetDevicePath(wwn string) (string, error)
+	GetDevicePath(wwn, volumeID string) (string, error)
 }
 
 type NodeMounter struct {
@@ -65,11 +65,11 @@ func (m *NodeMounter) RescanSCSIBus() error {
 	return nil
 }
 
-func (m *NodeMounter) GetDevicePath(wwn string) (devicePath string, err error) {
+func (m *NodeMounter) GetDevicePath(wwn, volumeID string) (devicePath string, err error) {
 	c := fibrechannel.Connector{}
 	// Prepending the 3 which is missing in the wwn getting it from the PowerVS infra
 	c.WWIDs = []string{"3" + wwn}
-
+	c.VolumeName = volumeID
 	return fibrechannel.Attach(c, &fibrechannel.OSioHandler{})
 }
 

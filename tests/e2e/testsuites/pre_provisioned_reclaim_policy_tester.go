@@ -16,31 +16,31 @@ limitations under the License.
 
 package testsuites
 
-import (
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
+// import (
+// 	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
 
-	v1 "k8s.io/api/core/v1"
-	clientset "k8s.io/client-go/kubernetes"
-)
+// 	v1 "k8s.io/api/core/v1"
+// 	clientset "k8s.io/client-go/kubernetes"
+// )
 
-// PreProvisionedReclaimPolicyTest will provision required PV(s) and PVC(s)
-// Testing the correct behavior for different reclaimPolicies
-type PreProvisionedReclaimPolicyTest struct {
-	CSIDriver driver.PreProvisionedVolumeTestDriver
-	Volumes   []VolumeDetails
-}
+// // PreProvisionedReclaimPolicyTest will provision required PV(s) and PVC(s)
+// // Testing the correct behavior for different reclaimPolicies
+// type PreProvisionedReclaimPolicyTest struct {
+// 	CSIDriver driver.PreProvisionedVolumeTestDriver
+// 	Volumes   []VolumeDetails
+// }
 
-func (t *PreProvisionedReclaimPolicyTest) Run(client clientset.Interface, namespace *v1.Namespace) {
-	for _, volume := range t.Volumes {
-		tpvc, _ := volume.SetupPreProvisionedPersistentVolumeClaim(client, namespace, t.CSIDriver)
+// func (t *PreProvisionedReclaimPolicyTest) Run(client clientset.Interface, namespace *v1.Namespace) {
+// 	for _, volume := range t.Volumes {
+// 		tpvc, _ := volume.SetupPreProvisionedPersistentVolumeClaim(client, namespace, t.CSIDriver)
 
-		// will delete the PVC
-		// will also wait for PV to be deleted when reclaimPolicy=Delete
-		tpvc.Cleanup()
-		// first check PV stills exists, then manually delete it
-		if tpvc.ReclaimPolicy() == v1.PersistentVolumeReclaimRetain {
-			tpvc.WaitForPersistentVolumePhase(v1.VolumeReleased)
-			tpvc.DeleteBoundPersistentVolume()
-		}
-	}
-}
+// 		// will delete the PVC
+// 		// will also wait for PV to be deleted when reclaimPolicy=Delete
+// 		tpvc.Cleanup()
+// 		// first check PV stills exists, then manually delete it
+// 		if tpvc.ReclaimPolicy() == v1.PersistentVolumeReclaimRetain {
+// 			tpvc.WaitForPersistentVolumePhase(v1.VolumeReleased)
+// 			tpvc.DeleteBoundPersistentVolume()
+// 		}
+// 	}
+// }

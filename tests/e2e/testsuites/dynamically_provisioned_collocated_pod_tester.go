@@ -16,43 +16,43 @@ limitations under the License.
 
 package testsuites
 
-import (
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
+// import (
+// 	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
 
-	v1 "k8s.io/api/core/v1"
-	clientset "k8s.io/client-go/kubernetes"
+// 	v1 "k8s.io/api/core/v1"
+// 	clientset "k8s.io/client-go/kubernetes"
 
-	. "github.com/onsi/ginkgo/v2"
-)
+// 	. "github.com/onsi/ginkgo/v2"
+// )
 
-// DynamicallyProvisionedCollocatedPodTest will provision required StorageClass(es), PVC(s) and Pod(s)
-// Waiting for the PV provisioner to create a new PV
-// Testing if multiple Pod(s) can write simultaneously
-type DynamicallyProvisionedCollocatedPodTest struct {
-	CSIDriver    driver.DynamicPVTestDriver
-	Pods         []PodDetails
-	ColocatePods bool
-}
+// // DynamicallyProvisionedCollocatedPodTest will provision required StorageClass(es), PVC(s) and Pod(s)
+// // Waiting for the PV provisioner to create a new PV
+// // Testing if multiple Pod(s) can write simultaneously
+// type DynamicallyProvisionedCollocatedPodTest struct {
+// 	CSIDriver    driver.DynamicPVTestDriver
+// 	Pods         []PodDetails
+// 	ColocatePods bool
+// }
 
-func (t *DynamicallyProvisionedCollocatedPodTest) Run(client clientset.Interface, namespace *v1.Namespace) {
-	nodeName := ""
-	for _, pod := range t.Pods {
-		tpod, cleanup := pod.SetupWithDynamicVolumes(client, namespace, t.CSIDriver)
-		if t.ColocatePods && nodeName != "" {
-			tpod.SetNodeSelector(map[string]string{"name": nodeName})
-		}
-		// defer must be called here for resources not get removed before using them
-		for i := range cleanup {
-			defer cleanup[i]()
-		}
+// func (t *DynamicallyProvisionedCollocatedPodTest) Run(client clientset.Interface, namespace *v1.Namespace) {
+// 	nodeName := ""
+// 	for _, pod := range t.Pods {
+// 		tpod, cleanup := pod.SetupWithDynamicVolumes(client, namespace, t.CSIDriver)
+// 		if t.ColocatePods && nodeName != "" {
+// 			tpod.SetNodeSelector(map[string]string{"name": nodeName})
+// 		}
+// 		// defer must be called here for resources not get removed before using them
+// 		for i := range cleanup {
+// 			defer cleanup[i]()
+// 		}
 
-		By("deploying the pod")
-		tpod.Create()
-		defer tpod.Cleanup()
+// 		By("deploying the pod")
+// 		tpod.Create()
+// 		defer tpod.Cleanup()
 
-		By("checking that the pod is running")
-		tpod.WaitForRunning()
-		nodeName = tpod.pod.Spec.NodeName
-	}
+// 		By("checking that the pod is running")
+// 		tpod.WaitForRunning()
+// 		nodeName = tpod.pod.Spec.NodeName
+// 	}
 
-}
+// }

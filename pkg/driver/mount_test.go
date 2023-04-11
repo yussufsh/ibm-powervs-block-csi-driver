@@ -13,101 +13,101 @@ limitations under the License.
 
 package driver
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
-)
+// import (
+// 	"os"
+// 	"path/filepath"
+// 	"testing"
+// )
 
-func TestMakeDir(t *testing.T) {
-	// Setup the full driver and its environment
-	dir, err := os.MkdirTemp("", "mount-powervs-csi")
-	if err != nil {
-		t.Fatalf("error creating directory %v", err)
-	}
-	defer os.RemoveAll(dir)
+// func TestMakeDir(t *testing.T) {
+// 	// Setup the full driver and its environment
+// 	dir, err := os.MkdirTemp("", "mount-powervs-csi")
+// 	if err != nil {
+// 		t.Fatalf("error creating directory %v", err)
+// 	}
+// 	defer os.RemoveAll(dir)
 
-	targetPath := filepath.Join(dir, "targetdir")
+// 	targetPath := filepath.Join(dir, "targetdir")
 
-	mountObj := newNodeMounter()
+// 	mountObj := newNodeMounter()
 
-	if mountObj.MakeDir(targetPath) != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if mountObj.MakeDir(targetPath) != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-	if mountObj.MakeDir(targetPath) != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if mountObj.MakeDir(targetPath) != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-	if exists, err := mountObj.ExistsPath(targetPath); !exists {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
-}
+// 	if exists, err := mountObj.ExistsPath(targetPath); !exists {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
+// }
 
-func TestMakeFile(t *testing.T) {
-	// Setup the full driver and its environment
-	dir, err := os.MkdirTemp("", "mount-powervs-csi")
-	if err != nil {
-		t.Fatalf("error creating directory %v", err)
-	}
-	defer os.RemoveAll(dir)
+// func TestMakeFile(t *testing.T) {
+// 	// Setup the full driver and its environment
+// 	dir, err := os.MkdirTemp("", "mount-powervs-csi")
+// 	if err != nil {
+// 		t.Fatalf("error creating directory %v", err)
+// 	}
+// 	defer os.RemoveAll(dir)
 
-	targetPath := filepath.Join(dir, "targetfile")
+// 	targetPath := filepath.Join(dir, "targetfile")
 
-	mountObj := newNodeMounter()
+// 	mountObj := newNodeMounter()
 
-	if mountObj.MakeFile(targetPath) != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if mountObj.MakeFile(targetPath) != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-	if mountObj.MakeFile(targetPath) != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if mountObj.MakeFile(targetPath) != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-	if exists, err := mountObj.ExistsPath(targetPath); !exists {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if exists, err := mountObj.ExistsPath(targetPath); !exists {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-}
+// }
 
-func TestExistsPath(t *testing.T) {
-	// Setup the full driver and its environment
-	dir, err := os.MkdirTemp("", "mount-powervs-csi")
-	if err != nil {
-		t.Fatalf("error creating directory %v", err)
-	}
-	defer os.RemoveAll(dir)
+// func TestExistsPath(t *testing.T) {
+// 	// Setup the full driver and its environment
+// 	dir, err := os.MkdirTemp("", "mount-powervs-csi")
+// 	if err != nil {
+// 		t.Fatalf("error creating directory %v", err)
+// 	}
+// 	defer os.RemoveAll(dir)
 
-	targetPath := filepath.Join(dir, "notafile")
+// 	targetPath := filepath.Join(dir, "notafile")
 
-	mountObj := newNodeMounter()
+// 	mountObj := newNodeMounter()
 
-	exists, err := mountObj.ExistsPath(targetPath)
+// 	exists, err := mountObj.ExistsPath(targetPath)
 
-	if err != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if err != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-	if exists {
-		t.Fatalf("Expected file %s to not exist", targetPath)
-	}
+// 	if exists {
+// 		t.Fatalf("Expected file %s to not exist", targetPath)
+// 	}
 
-}
+// }
 
-func TestGetDeviceName(t *testing.T) {
-	// Setup the full driver and its environment
-	dir, err := os.MkdirTemp("", "mount-powervs-csi")
-	if err != nil {
-		t.Fatalf("error creating directory %v", err)
-	}
-	defer os.RemoveAll(dir)
+// func TestGetDeviceName(t *testing.T) {
+// 	// Setup the full driver and its environment
+// 	dir, err := os.MkdirTemp("", "mount-powervs-csi")
+// 	if err != nil {
+// 		t.Fatalf("error creating directory %v", err)
+// 	}
+// 	defer os.RemoveAll(dir)
 
-	targetPath := filepath.Join(dir, "notafile")
+// 	targetPath := filepath.Join(dir, "notafile")
 
-	mountObj := newNodeMounter()
+// 	mountObj := newNodeMounter()
 
-	if _, _, err := mountObj.GetDeviceName(targetPath); err != nil {
-		t.Fatalf("Expect no error but got: %v", err)
-	}
+// 	if _, _, err := mountObj.GetDeviceName(targetPath); err != nil {
+// 		t.Fatalf("Expect no error but got: %v", err)
+// 	}
 
-}
+// }

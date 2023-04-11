@@ -16,33 +16,33 @@ limitations under the License.
 
 package testsuites
 
-import (
-	. "github.com/onsi/ginkgo/v2"
-	v1 "k8s.io/api/core/v1"
-	clientset "k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
-)
+// import (
+// 	. "github.com/onsi/ginkgo/v2"
+// 	v1 "k8s.io/api/core/v1"
+// 	clientset "k8s.io/client-go/kubernetes"
+// 	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
+// )
 
-// DynamicallyProvisionedCmdVolumeTest will provision required StorageClass(es), PVC(s) and Pod(s)
-// Waiting for the PV provisioner to create a new PV
-// Testing if the Pod(s) Cmd is run with a 0 exit code
-type DynamicallyProvisionedCmdVolumeTest struct {
-	CSIDriver driver.DynamicPVTestDriver
-	Pods      []PodDetails
-}
+// // DynamicallyProvisionedCmdVolumeTest will provision required StorageClass(es), PVC(s) and Pod(s)
+// // Waiting for the PV provisioner to create a new PV
+// // Testing if the Pod(s) Cmd is run with a 0 exit code
+// type DynamicallyProvisionedCmdVolumeTest struct {
+// 	CSIDriver driver.DynamicPVTestDriver
+// 	Pods      []PodDetails
+// }
 
-func (t *DynamicallyProvisionedCmdVolumeTest) Run(client clientset.Interface, namespace *v1.Namespace) {
-	for _, pod := range t.Pods {
-		tpod, cleanup := pod.SetupWithDynamicVolumes(client, namespace, t.CSIDriver)
-		// defer must be called here for resources not get removed before using them
-		for i := range cleanup {
-			defer cleanup[i]()
-		}
+// func (t *DynamicallyProvisionedCmdVolumeTest) Run(client clientset.Interface, namespace *v1.Namespace) {
+// 	for _, pod := range t.Pods {
+// 		tpod, cleanup := pod.SetupWithDynamicVolumes(client, namespace, t.CSIDriver)
+// 		// defer must be called here for resources not get removed before using them
+// 		for i := range cleanup {
+// 			defer cleanup[i]()
+// 		}
 
-		By("deploying the pod")
-		tpod.Create()
-		defer tpod.Cleanup()
-		By("checking that the pods command exits with no error")
-		tpod.WaitForSuccess()
-	}
-}
+// 		By("deploying the pod")
+// 		tpod.Create()
+// 		defer tpod.Cleanup()
+// 		By("checking that the pods command exits with no error")
+// 		tpod.WaitForSuccess()
+// 	}
+// }

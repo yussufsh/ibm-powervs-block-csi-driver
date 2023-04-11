@@ -16,95 +16,51 @@ limitations under the License.
 
 package driver
 
-import (
-	"fmt"
-	"os"
-	goexec "os/exec"
+// import (
+// 	"k8s.io/mount-utils"
+// 	"k8s.io/utils/exec"
+// 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
+// )
 
-	"k8s.io/klog/v2"
-	"k8s.io/utils/exec"
-	"k8s.io/utils/mount"
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
-)
+// type mountInterface = mount.Interface
 
-// Mounter is an interface for mount operations
-type Mounter interface {
-	mount.Interface
-	exec.Interface
-	FormatAndMount(source string, target string, fstype string, options []string) error
-	GetDeviceName(mountPath string) (string, int, error)
-	MakeFile(pathname string) error
-	MakeDir(pathname string) error
-	ExistsPath(filename string) (bool, error)
-	RescanSCSIBus() error
-	GetDevicePath(wwn, volumeID string) (string, error)
-}
+// // Mounter is the interface implemented by Mounter
+// type Mounter interface {
+// 	mountInterface
 
-type NodeMounter struct {
-	mount.SafeFormatAndMount
-	exec.Interface
-}
+// 	GetSafeFormatAndMount() *mount.SafeFormatAndMount
+// 	MakeFile(path string) error
+// 	MakeDir(path string) error
+// 	PathExists(path string) (bool, error)
+// 	Resize(string, string) (bool, error)
+// 	GetDevicePath(wwn, volumeID string) (string, error)
+// }
 
-func newNodeMounter() Mounter {
-	return &NodeMounter{
-		mount.SafeFormatAndMount{
-			Interface: mount.New(""),
-			Exec:      exec.New(),
-		},
-		exec.New(),
-	}
-}
+// type NodeMounter struct {
+// 	*mount.SafeFormatAndMount
+// }
 
-func (m *NodeMounter) RescanSCSIBus() error {
-	cmd := goexec.Command("/usr/bin/rescan-scsi-bus.sh")
-	stdoutStderr, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to rescan-scsi-bus.sh: %v", err)
-	}
-	klog.V(5).Infof("output of rescan-scsi-bus.sh: %s", stdoutStderr)
-	return nil
-}
+// // NewNodeMounter ...
+// func NewNodeMounter() Mounter {
+// 	// mounter.newSafeMounter returns a SafeFormatAndMount
+// 	safeMounter := newSafeMounter()
+// 	return &NodeMounter{safeMounter}
+// }
 
-func (m *NodeMounter) GetDevicePath(wwn, volumeID string) (devicePath string, err error) {
-	c := fibrechannel.Connector{}
-	// Prepending the 3 which is missing in the wwn getting it from the PowerVS infra
-	c.WWIDs = []string{"3" + wwn}
-	c.VolumeName = volumeID
-	return fibrechannel.Attach(c, &fibrechannel.OSioHandler{})
-}
+// // NewSafeMounter ...
+// func newSafeMounter() *mount.SafeFormatAndMount {
+// 	realMounter := mount.New("")
+// 	realExec := exec.New()
+// 	return &mount.SafeFormatAndMount{
+// 		Interface: realMounter,
+// 		Exec:      realExec,
+// 	}
+// }
 
-func (m *NodeMounter) GetDeviceName(mountPath string) (string, int, error) {
-	return mount.GetDeviceNameFromMount(m, mountPath)
-}
-
-func (m *NodeMounter) MakeFile(pathname string) error {
-	f, err := os.OpenFile(pathname, os.O_CREATE, os.FileMode(0644))
-	if err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *NodeMounter) MakeDir(pathname string) error {
-	err := os.MkdirAll(pathname, os.FileMode(0755))
-	if err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *NodeMounter) ExistsPath(filename string) (bool, error) {
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
-}
+// func (m *NodeMounter) GetDevicePath(wwn, volumeID string) (devicePath string, err error) {
+// 	c := fibrechannel.Connector{}
+// 	// Prepending the 3 which is missing in the wwn getting it from the PowerVS infra
+// 	c.WWIDs = []string{"3" + wwn}
+// 	c.VolumeName = volumeID
+// 	return fibrechannel.Attach(c, &fibrechannel.OSioHandler{})
+// }

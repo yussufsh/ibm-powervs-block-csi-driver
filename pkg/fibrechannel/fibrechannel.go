@@ -77,7 +77,7 @@ func FindMultipathDeviceForDevice(device string, io ioHandler, vol string) (stri
 	}
 
 	if strings.HasPrefix(disk, "dm-") {
-		klog.Info("fb: FindMultipathDeviceForDevice from vol: %s device: %s dstPath: %s itself is dm", vol, device, disk)
+		klog.Infof("fb: FindMultipathDeviceForDevice from vol: %s device: %s dstPath: %s itself is dm", vol, device, disk)
 		return "/dev/" + disk, nil
 	}
 

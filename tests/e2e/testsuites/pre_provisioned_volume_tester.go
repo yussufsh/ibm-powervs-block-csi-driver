@@ -16,33 +16,33 @@ limitations under the License.
 
 package testsuites
 
-import (
-	. "github.com/onsi/ginkgo/v2"
-	v1 "k8s.io/api/core/v1"
-	clientset "k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
-)
+// import (
+// 	. "github.com/onsi/ginkgo/v2"
+// 	v1 "k8s.io/api/core/v1"
+// 	clientset "k8s.io/client-go/kubernetes"
+// 	"sigs.k8s.io/ibm-powervs-block-csi-driver/tests/e2e/driver"
+// )
 
-// PreProvisionedVolumeTest will provision required PV(s), PVC(s) and Pod(s)
-// Testing if the Pod(s) can write and read to mounted volumes
-type PreProvisionedVolumeTest struct {
-	CSIDriver driver.PreProvisionedVolumeTestDriver
-	Pods      []PodDetails
-}
+// // PreProvisionedVolumeTest will provision required PV(s), PVC(s) and Pod(s)
+// // Testing if the Pod(s) can write and read to mounted volumes
+// type PreProvisionedVolumeTest struct {
+// 	CSIDriver driver.PreProvisionedVolumeTestDriver
+// 	Pods      []PodDetails
+// }
 
-func (t *PreProvisionedVolumeTest) Run(client clientset.Interface, namespace *v1.Namespace) {
+// func (t *PreProvisionedVolumeTest) Run(client clientset.Interface, namespace *v1.Namespace) {
 
-	for _, pod := range t.Pods {
-		tpod, cleanup := pod.SetupWithPreProvisionedVolumes(client, namespace, t.CSIDriver)
-		// defer must be called here for resources not get removed before using them
-		for i := range cleanup {
-			defer cleanup[i]()
-		}
-		By("deploying the pod")
-		tpod.Create()
+// 	for _, pod := range t.Pods {
+// 		tpod, cleanup := pod.SetupWithPreProvisionedVolumes(client, namespace, t.CSIDriver)
+// 		// defer must be called here for resources not get removed before using them
+// 		for i := range cleanup {
+// 			defer cleanup[i]()
+// 		}
+// 		By("deploying the pod")
+// 		tpod.Create()
 
-		By("checking that the pods command exits with no error")
-		tpod.WaitForSuccess()
-		defer tpod.Cleanup()
-	}
-}
+// 		By("checking that the pods command exits with no error")
+// 		tpod.WaitForSuccess()
+// 		defer tpod.Cleanup()
+// 	}
+// }

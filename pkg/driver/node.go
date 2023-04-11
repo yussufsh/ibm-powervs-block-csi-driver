@@ -104,6 +104,11 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
+	target := req.GetStagingTargetPath()
+	if len(target) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "Staging target not provided")
+	}
+
 	volCap := req.GetVolumeCapability()
 	if volCap == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not provided")
@@ -114,34 +119,6 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 	defer d.volumeLocks.Release(volumeID)
 
-	target := req.GetStagingTargetPath()
-	if len(target) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Staging target not provided")
-	}
-
-	mounted, err := d.isDirMounted(target)
-	needsCreateDir := false
-	if mounted {
-		// Already mounted
-		klog.V(4).Infof("NodeStageVolume succeeded on volume %v to staging target path %s, mount already exists.", volumeID, target)
-		return &csi.NodeStageVolumeResponse{}, nil
-	}
-
-	if err != nil {
-		if os.IsNotExist(err) {
-			needsCreateDir = true
-		} else {
-			return nil, err
-		}
-	}
-
-	if needsCreateDir {
-		klog.V(4).Infof("NodeStageVolume attempting mkdir for path %s", target)
-		if err := os.MkdirAll(target, 0750); err != nil {
-			return nil, fmt.Errorf("mkdir failed for path %s (%v)", target, err)
-		}
-	}
-
 	if !isValidVolumeCapabilities([]*csi.VolumeCapability{volCap}) {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability not supported")
 	}
@@ -150,6 +127,24 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	switch volCap.GetAccessType().(type) {
 	case *csi.VolumeCapability_Block:
 		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
+	mounted, err := d.isDirMounted(target)
+	if mounted {
+		// Already mounted
+		klog.V(4).Infof("NodeStageVolume succeeded on volume %v to staging target path %s, mount already exists.", volumeID, target)
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			klog.V(4).Infof("NodeStageVolume attempting mkdir for path %s", target)
+			if err := os.MkdirAll(target, 0750); err != nil {
+				return nil, fmt.Errorf("mkdir failed for path %s (%v)", target, err)
+			}
+		} else {
+			return nil, err
+		}
 	}
 
 	mnt := volCap.GetMount()
@@ -184,7 +179,7 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	// Check if a device is mounted in target directory
 	device, _, err := d.mounter.GetDeviceName(target)
 	if err != nil {
-		msg := fmt.Sprintf("failed to check if volume is already mounted: %v", err)
+		msg := fmt.Sprintf("failed to check if volume is already mounted: %v for wwn %s", err, wwn)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
@@ -197,12 +192,13 @@ func (d *nodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 
 	// FormatAndMount will format only if needed
-	klog.V(5).Infof("NodeStageVolume: formatting %s and mounting at %s with fstype %s", source, target, fsType)
+	klog.V(5).Infof("NodeStageVolume: starting formatting %s and mounting at %s with fstype %s for wwn %s", source, target, fsType, wwn)
 	err = d.mounter.FormatAndMount(source, target, fsType, mountOptions)
 	if err != nil {
-		msg := fmt.Sprintf("could not format %q and mnt it at %q", source, target)
+		msg := fmt.Sprintf("could not format %q and mnt it at %q for wwn %s", source, target, wwn)
 		return nil, status.Error(codes.Internal, msg)
 	}
+	klog.V(5).Infof("NodeStageVolume: completed formatting %s and mounting at %s with fstype %s for wwn %s", source, target, fsType, wwn)
 
 	return &csi.NodeStageVolumeResponse{}, nil
 }
@@ -229,7 +225,7 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	// returns the device name, reference count, and error code
 	dev, refCount, err := d.mounter.GetDeviceName(target)
 	if err != nil {
-		msg := fmt.Sprintf("failed to check if volume is mounted: %v", err)
+		msg := fmt.Sprintf("failed to check if volume is mounted: %v for vol %s", err, volumeID)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
@@ -243,7 +239,7 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		devicePath := d.lookupForBlockVolumeDevice(volumeID)
 		if devicePath != "" {
 			klog.V(5).Infof("lookupForBlockVolumeDevice is true for volume : %s and device: %s", volumeID, devicePath)
-			err = cleanupDevice(devicePath)
+			err = cleanupDevice(devicePath, volumeID)
 		} else {
 			klog.V(5).Infof("lookupForBlockVolumeDevice is false for volume : %s and device: %s", volumeID, devicePath)
 		}
@@ -256,16 +252,16 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	}
 
 	if refCount > 1 {
-		klog.Warningf("NodeUnstageVolume: found %d references to device %s mounted at target path %s", refCount, dev, target)
+		klog.Warningf("NodeUnstageVolume: found %d references to device %s mounted at target path %s for vol %s", refCount, dev, target, volumeID)
 	}
 
-	klog.V(5).Infof("NodeUnstageVolume: unmounting %s", target)
+	klog.V(5).Infof("NodeUnstageVolume: unmounting %s for vol %s", target, volumeID)
 	err = d.mounter.Unmount(target)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount target %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount for vol %s target %q: %v", volumeID, target, err)
 	}
 
-	err = cleanupDevice(dev)
+	err = cleanupDevice(dev, volumeID)
 	if err != nil {
 		return nil, err
 	}
@@ -326,10 +322,10 @@ func (d *nodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 
 	// Acquire a lock on the target path instead of volumeID, since we do not want to serialize multiple node publish calls on the same volume.
-	if acquired := d.volumeLocks.TryAcquire(target); !acquired {
+	if acquired := d.volumeLocks.TryAcquire(volumeID); !acquired {
 		return nil, status.Errorf(codes.Aborted, util.VolumeOperationAlreadyExistsFmt, target)
 	}
-	defer d.volumeLocks.Release(target)
+	defer d.volumeLocks.Release(volumeID)
 
 	volCap := req.GetVolumeCapability()
 	if volCap == nil {
@@ -372,10 +368,10 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	}
 
 	// Acquire a lock on the target path instead of volumeID, since we do not want to serialize multiple node publish calls on the same volume.
-	if acquired := d.volumeLocks.TryAcquire(target); !acquired {
+	if acquired := d.volumeLocks.TryAcquire(volumeID); !acquired {
 		return nil, status.Errorf(codes.Aborted, util.VolumeOperationAlreadyExistsFmt, target)
 	}
-	defer d.volumeLocks.Release(target)
+	defer d.volumeLocks.Release(volumeID)
 
 	// Check if target directory is a mount point
 	// returns the device name, reference count, and error code
@@ -391,10 +387,10 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	// 	return nil, status.Errorf(codes.NotFound, "failed to determine device type for path [%s]: %v", target, err)
 	// }
 
-	klog.V(5).Infof("NodeUnpublishVolume: unmounting %s", target)
+	klog.V(5).Infof("NodeUnpublishVolume: starting unmounting %s for vol %s", target, volumeID)
 	err := d.mounter.Unmount(target)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not unmount %q: %v", target, err)
+		return nil, status.Errorf(codes.Internal, "Could not unmount %q for vol %s volumeID: %v", target, volumeID, err)
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -403,6 +399,7 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 func (d *nodeService) lookupForBlockVolumeDevice(vol string) string {
 	dev, ok := d.blockVolumeDevices[vol]
 	if ok {
+		klog.V(4).Infof("lookupForBlockVolumeDevice: found volume %s in blockVolumeDevices", vol)
 		delete(d.blockVolumeDevices, vol)
 		return dev
 	}
@@ -543,35 +540,35 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 	// Path in the form of /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices/publish/{volumeName}
 	exists, err = d.mounter.ExistsPath(globalMountPath)
 	if err != nil {
-		return status.Errorf(codes.Internal, "Could not check if path exists %q: %v", globalMountPath, err)
+		return status.Errorf(codes.Internal, "Could not check if path exists %q for wwn %s: %v", globalMountPath, wwn, err)
 	}
 
 	if !exists {
 		if err = d.mounter.MakeDir(globalMountPath); err != nil {
-			return status.Errorf(codes.Internal, "Could not create dir %q: %v", globalMountPath, err)
+			return status.Errorf(codes.Internal, "Could not create dir %q for wwn %s: %v", globalMountPath, wwn, err)
 		}
 	}
 
 	// Create the mount point as a file since bind mount device node requires it to be a file
-	klog.V(5).Infof("NodePublishVolume [block]: making target file %s", target)
+	klog.V(5).Infof("NodePublishVolume [block]: making target file %s for wwn %s", target, wwn)
 	err = d.mounter.MakeFile(target)
 	if err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q: %v", target, removeErr)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, removeErr)
 		}
-		return status.Errorf(codes.Internal, "Could not create file %q: %v", target, err)
+		return status.Errorf(codes.Internal, "Could not create file %q for wwn %s: %v", target, wwn, err)
 	}
 
-	klog.V(5).Infof("NodePublishVolume [block]: mounting %s at %s", source, target)
+	klog.V(5).Infof("NodePublishVolume [block]: mounting %s at %s for wwn %s", source, target, wwn)
 	if err := d.mounter.Mount(source, target, "", mountOptions); err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q: %v", target, removeErr)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, removeErr)
 		}
-		return status.Errorf(codes.Internal, "Could not mount %q at %q: %v", source, target, err)
+		return status.Errorf(codes.Internal, "Could not mount %q at %q for wwn %s: %v", source, target, wwn, err)
 	}
 
 	// FIX: storage the block devices in a map to clean up during UnpublishVolume.
-	klog.V(5).Infof("NodePublishVolume [block]: storing device %s for volume %s into blockVolumeDevices", source, volumeID)
+	klog.V(5).Infof("NodePublishVolume [block]: storing device %s for volume %s into blockVolumeDevices for wwn %s", source, volumeID, wwn)
 	d.blockVolumeDevices[volumeID] = source
 
 	return nil
@@ -580,6 +577,11 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeRequest, mountOptions []string, mode *csi.VolumeCapability_Mount) error {
 	target := req.GetTargetPath()
 	source := req.GetStagingTargetPath()
+	wwn, exists := req.PublishContext[WWNKey]
+	if !exists {
+		return status.Error(codes.InvalidArgument, "WWN ID not provided")
+	}
+
 	if m := mode.Mount; m != nil {
 		for _, f := range m.MountFlags {
 			if !hasMountOption(mountOptions, f) {
@@ -588,9 +590,9 @@ func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeR
 		}
 	}
 
-	klog.V(5).Infof("NodePublishVolume: creating dir %s", target)
+	klog.V(5).Infof("NodePublishVolume: creating dir %s for wwn %s", target, wwn)
 	if err := d.mounter.MakeDir(target); err != nil {
-		return status.Errorf(codes.Internal, "Could not create dir %q: %v", target, err)
+		return status.Errorf(codes.Internal, "Could not create dir %q for wwn %s: %v", target, wwn, err)
 	}
 
 	fsType := mode.Mount.GetFsType()
@@ -598,13 +600,14 @@ func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeR
 		fsType = defaultFsType
 	}
 
-	klog.V(5).Infof("NodePublishVolume: mounting %s at %s with option %s as fstype %s", source, target, mountOptions, fsType)
+	klog.V(5).Infof("NodePublishVolume: started mounting %s at %s with option %s as fstype %s for wwn %s", source, target, mountOptions, fsType, wwn)
 	if err := d.mounter.Mount(source, target, fsType, mountOptions); err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {
-			return status.Errorf(codes.Internal, "Could not remove mount target %q: %v", target, err)
+			return status.Errorf(codes.Internal, "Could not remove mount target %q for wwn %s: %v", target, wwn, err)
 		}
-		return status.Errorf(codes.Internal, "Could not mount %q at %q: %v", source, target, err)
+		return status.Errorf(codes.Internal, "Could not mount %q at %q for wwn %s: %v", source, target, wwn, err)
 	}
+	klog.V(5).Infof("NodePublishVolume: completed mounting %s at %s with option %s as fstype %s for wwn %s", source, target, mountOptions, fsType, wwn)
 
 	return nil
 }
@@ -646,23 +649,23 @@ func (d *nodeService) isDirMounted(target string) (bool, error) {
 }
 
 // cleanupDevice remove the device path
-func cleanupDevice(dev string) error {
-	klog.V(5).Infof("running cleanupDevice with device: %s", dev)
+func cleanupDevice(dev, volumeID string) error {
+	klog.V(5).Infof("running cleanupDevice with device for vol %s: %s", volumeID, dev)
 	handler := &fibrechannel.OSioHandler{}
 	var mpath bool
-	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler); mdev != "" {
-		klog.V(5).Infof("Multipath device found: %s for %s", mdev, dev)
+	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler, volumeID); mdev != "" {
+		klog.V(5).Infof("Multipath device found: %s for %s vol %s", mdev, dev, volumeID)
 		mpath = true
 		dev = mdev
 	}
-	klog.Infof("Detaching: %s", dev)
+	klog.Infof("Detaching for volume %s: %s", volumeID, dev)
 	err := fibrechannel.Detach(dev, handler)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to detach %s: %v", dev, err)
+		return status.Errorf(codes.Internal, "failed to detach %s vol %s: %v", dev, volumeID, err)
 	}
 	if mpath {
-		klog.Infof("Deleting the multipath device: %s", dev)
-		if err := fibrechannel.RemoveMultipathDevice(dev); err != nil {
+		klog.Infof("Deleting the multipath device for vol %s: %s", volumeID, dev)
+		if err := fibrechannel.RemoveMultipathDevice(dev, volumeID); err != nil {
 			return err
 		}
 	}

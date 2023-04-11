@@ -70,15 +70,15 @@ func (handler *OSioHandler) WriteFile(filename string, data []byte, perm os.File
 }
 
 // FindMultipathDeviceForDevice given a device name like /dev/sdx, find the devicemapper parent
-func FindMultipathDeviceForDevice(device string, io ioHandler) (string, error) {
+func FindMultipathDeviceForDevice(device string, io ioHandler, symlink string) (string, error) {
 	disk, err := findDeviceForPath(device, io)
 	if err != nil {
 		return "", err
 	}
 
 	if strings.HasPrefix(disk, "dm-") {
-		klog.Info("fb: FindMultipathDeviceForDevice: device itself is dm")
-		return device, nil
+		klog.Info("fb: FindMultipathDeviceForDevice from symlink: %s device: %s dstPath: %s itself is dm", symlink, device, disk)
+		return "/dev/" + disk, nil
 	}
 
 	sysPath := "/sys/block/"
@@ -158,8 +158,8 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	// first phase, search existing device path, if a multipath dm is found, exit loop
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
 	for _, diskID := range diskIds {
-		klog.Info("fb: rescan disk with polling")
-		err := wait.PollImmediate(1*time.Second, 2*time.Minute, func() (bool, error) {
+		klog.Infof("fb: starting to rescan disk with polling %s", diskID)
+		err := wait.PollImmediate(2*time.Second, 2*time.Minute, func() (bool, error) {
 			if len(c.TargetWWNs) != 0 {
 				disk, dm = findDisk(diskID, c.Lun, io)
 			} else {
@@ -168,52 +168,43 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 
 			// found the disk before timeout
 			if dm != "" {
-				klog.Infof("fb: rescan disk with polling [FOUND] disk: %s dm: %s", disk, dm)
+				klog.Infof("fb: rescan disk with polling wwn: %s disk: %s dm: %s", diskID, disk, dm)
 				return true, nil
 			} else if disk != "" {
 				// FIXME: this is only to test dm path; so we are not returning
-				klog.Infof("fb: rescan disk with polling [FOUND] disk: %s", disk)
+				klog.Infof("fb: rescan disk with polling wwn: %s disk: %s", diskID, disk)
 			} else {
 				// if no disk matches then retry
-				klog.Info("fb: rescan disk with polling [EMPTY]")
+				klog.Infof("fb: rescan disk with polling wwn: %s [EMPTY]", diskID)
 			}
 
 			if !rescaned {
 				err := scsiHostRescan(io)
-				rescaned = true
 				if err != nil {
 					return false, err
 				}
+				rescaned = true
 			}
 
 			// wait until timeout
 			return false, nil
 		})
 		if err != nil {
-			klog.Errorf("failed within timeout %v", err)
-			return "", fmt.Errorf("failed within timeout %v", err)
+			klog.Errorf("failed within timeout wwn: %s err: %v", diskID, err)
+			return "", fmt.Errorf("failed within timeout wwn: %s err: %v", diskID, err)
 		}
 		if err == nil && disk == "" && dm == "" {
-			klog.Errorf("failed within timeout")
+			klog.Errorf("failed within timeout: no fc disk found for wwn: %s", diskID)
 		}
 		// if multipath device is found, break
 		if dm != "" {
-			break
+			return dm, nil
 		}
 
 	}
-	// if no disk matches input wwn and lun, exit
-	if disk == "" && dm == "" {
-		return "", fmt.Errorf("no fc disk found")
-	}
-
-	// if multipath devicemapper device is found, use it; otherwise use raw disk
-	if dm != "" {
-		return dm, nil
-	}
 
 	// FIXME: this is only to test dm path; so we are not returning for disk only
-	return "", fmt.Errorf("no fc disk found : no multipath disk found")
+	return "", fmt.Errorf("no fc disk found : no multipath disk found for wwn: %v", diskIds)
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent
@@ -225,7 +216,7 @@ func findDisk(wwn, lun string, io ioHandler) (string, string) {
 			name := f.Name()
 			if strings.Contains(name, FcPath) {
 				if disk, err1 := io.EvalSymlinks(DevPath + name); err1 == nil {
-					if dm, err2 := FindMultipathDeviceForDevice(disk, io); err2 == nil {
+					if dm, err2 := FindMultipathDeviceForDevice(disk, io, DevPath+name); err2 == nil {
 						return disk, dm
 					}
 				}
@@ -257,9 +248,9 @@ func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 					klog.Errorf("fc: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
 					return "", ""
 				}
-				dm, err1 := FindMultipathDeviceForDevice(disk, io)
+				dm, err1 := FindMultipathDeviceForDevice(disk, io, DevID+name)
 				if err1 != nil {
-					klog.Errorf("fc: failed to find a multipath disk for %s, error %v", disk, err)
+					klog.Errorf("fc: failed to find a multipath disk from symlink[%s], for %s, error %v", DevID+name, disk, err)
 					return disk, ""
 				}
 				return disk, dm
@@ -352,10 +343,21 @@ func detachFCDisk(devicePath string, io ioHandler) error {
 	if !strings.HasPrefix(devicePath, "/dev/") {
 		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
 	}
+	flushDevice(devicePath)
 	arr := strings.Split(devicePath, "/")
 	dev := arr[len(arr)-1]
 	err := removeFromScsiSubsystem(dev, io)
 	return err
+}
+
+// Flushes any outstanding I/O to the device
+func flushDevice(deviceName string) {
+	out, err := exec.Command("blockdev", "--flushbufs", deviceName).CombinedOutput()
+	if err != nil {
+		// Ignore the error and continue deleting the device. There is will be no retry on error.
+		klog.Warningf("Failed to flush device %s: %s\n%s", deviceName, err, string(out))
+	}
+	klog.V(4).Infof("Flushed device %s", deviceName)
 }
 
 // Removes a scsi device based upon /dev/sdX name
@@ -370,18 +372,12 @@ func removeFromScsiSubsystem(deviceName string, io ioHandler) error {
 	return nil
 }
 
-func RemoveMultipathDevice(device string) error {
-	stdoutStderr, err := exec.Command("multipath", "-F").CombinedOutput()
+func RemoveMultipathDevice(device, volumeID string) error {
+	cmd := exec.Command("multipath", "-f", device)
+	stdoutStderr, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed remove multipath devices: %s err: %v", device, err)
+		return fmt.Errorf("failed remove multipath device for vol %s: %s err: %v", volumeID, device, err)
 	}
-	klog.Infof("output of remove multipath devices command: %s", stdoutStderr)
+	klog.Infof("output of multipath device remove commandfor vol %s: %s: %s", volumeID, device, stdoutStderr)
 	return nil
-	// cmd := exec.Command("multipath", "-f", device)
-	// stdoutStderr, err := cmd.CombinedOutput()
-	// if err != nil {
-	// 	return fmt.Errorf("failed remove multipath device: %s err: %v", device, err)
-	// }
-	// klog.Infof("output of multipath device remove command: %s", stdoutStderr)
-	// return nil
 }

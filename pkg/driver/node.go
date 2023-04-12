@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/IBM/ibm-csi-common/pkg/mountmanager"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+	"k8s.io/mount-utils"
 	mountutils "k8s.io/mount-utils"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/cloud"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
@@ -285,26 +285,59 @@ func (d *nodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
+	volumePath := req.GetVolumePath()
+	if len(volumePath) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "Volume Path not provided")
+	}
 
 	if acquired := d.volumeLocks.TryAcquire(volumeID); !acquired {
 		return nil, status.Errorf(codes.Aborted, util.VolumeOperationAlreadyExistsFmt, volumeID)
 	}
 	defer d.volumeLocks.Release(volumeID)
 
-	args := []string{"-o", "source", "--noheadings", "--target", req.GetVolumePath()}
-	output, err := d.mounter.GetSafeFormatAndMount().Exec.Command("findmnt", args...).Output()
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Could not determine device path: %v", err)
+	volumeCapability := req.GetVolumeCapability()
+	isBlock := false
 
+	// VolumeCapability is optional, if specified, use that as source of truth.
+	if volumeCapability != nil {
+		if !isValidVolumeCapabilities([]*csi.VolumeCapability{volumeCapability}) {
+			return nil, status.Error(codes.InvalidArgument, "Volume capability not supported")
+		}
+		isBlock = volumeCapability.GetBlock() != nil
+	} else {
+		// VolumeCapability is nil, check if volumePath points to a block device.
+		var err error
+		isBlock, err = d.stats.IsBlockDevice(volumePath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to determine if volumePath %v is a block device: %v", volumePath, err)
+		}
+	}
+	// Noop for block NodeExpandVolume.
+	if isBlock {
+		klog.V(4).InfoS("NodeExpandVolume: called, since given volumePath is a block device, ignoring...", "volumeID", volumeID, "volumePath", volumePath)
+		return &csi.NodeExpandVolumeResponse{}, nil
 	}
 
-	devicePath := strings.TrimSpace(string(output))
-	if len(devicePath) == 0 {
-		return nil, status.Errorf(codes.Internal, "Could not get valid device for mount path: %q", req.GetVolumePath())
+	notMounted, err := d.mounter.IsLikelyNotMountPoint(volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "volume path %s check for mount failed: %v", volumePath, err)
+	}
+
+	if notMounted {
+		return nil, status.Errorf(codes.Internal, "volume path %s is not mounted", volumePath)
+	}
+
+	devicePath, _, err := mount.GetDeviceNameFromMount(d.mounter, volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get device from volume path %s: %v", volumePath, err)
+	}
+
+	if devicePath == "" {
+		return nil, status.Errorf(codes.Internal, "failed to get device from volume path %s", volumePath)
 	}
 
 	// TODO: lock per volume ID to have some idempotency
-	if _, err := d.mounter.Resize(devicePath, req.GetVolumePath()); err != nil {
+	if _, err := d.mounter.Resize(devicePath, volumePath); err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not resize volume %q (%q):  %v", volumeID, devicePath, err)
 	}
 

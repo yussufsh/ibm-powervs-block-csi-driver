@@ -279,7 +279,7 @@ func Attach(c Connector, io ioHandler) (string, error) {
 }
 
 // Detach performs a detach operation on a volume
-func Detach(devicePath string, io ioHandler) error {
+func Detach(devicePath string, io ioHandler, volumeID string) error {
 	if io == nil {
 		io = &OSioHandler{}
 	}
@@ -297,6 +297,19 @@ func Detach(devicePath string, io ioHandler) error {
 	} else {
 		// Add single devicepath to devices
 		devices = append(devices, dstPath)
+	}
+
+	var mpath bool
+	if mdev, _ := FindMultipathDeviceForDevice(devicePath, io, volumeID); mdev != "" {
+		klog.V(5).Infof("Multipath device found: %s for %s vol %s", mdev, devicePath, volumeID)
+		mpath = true
+		devicePath = mdev
+	}
+	if mpath {
+		klog.Infof("Deleting the multipath device for vol %s: %s", volumeID, devicePath)
+		if err := RemoveMultipathDevice(devicePath, volumeID); err != nil {
+			return err
+		}
 	}
 
 	klog.Infof("fc: DetachDisk devicePath: %v, dstPath: %v, devices: %v", devicePath, dstPath, devices)

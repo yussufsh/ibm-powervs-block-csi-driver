@@ -63,12 +63,13 @@ var (
 
 // nodeService represents the node service of CSI driver
 type nodeService struct {
-	cloud              cloud.Cloud
-	mounter            mountmanager.Mounter
-	driverOptions      *Options
-	pvmInstanceId      string
-	volumeLocks        *util.VolumeLocks
-	stats              StatsUtils
+	cloud         cloud.Cloud
+	mounter       mountmanager.Mounter
+	driverOptions *Options
+	pvmInstanceId string
+	volumeLocks   *util.VolumeLocks
+	stats         StatsUtils
+	// TODO: Instead of map use file storage
 	blockVolumeDevices map[string]string
 }
 
@@ -716,23 +717,13 @@ func (d *nodeService) isDirMounted(target string) (bool, error) {
 func cleanupDevice(dev, volumeID string) error {
 	klog.V(5).Infof("running cleanupDevice with device for vol %s: %s", volumeID, dev)
 	handler := &fibrechannel.OSioHandler{}
-	var mpath bool
-	if mdev, _ := fibrechannel.FindMultipathDeviceForDevice(dev, handler, volumeID); mdev != "" {
-		klog.V(5).Infof("Multipath device found: %s for %s vol %s", mdev, dev, volumeID)
-		mpath = true
-		dev = mdev
-	}
+
 	klog.Infof("Detaching for volume %s: %s", volumeID, dev)
-	err := fibrechannel.Detach(dev, handler)
+	err := fibrechannel.Detach(dev, handler, volumeID)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to detach %s vol %s: %v", dev, volumeID, err)
 	}
-	if mpath {
-		klog.Infof("Deleting the multipath device for vol %s: %s", volumeID, dev)
-		if err := fibrechannel.RemoveMultipathDevice(dev, volumeID); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 func (m *nodeService) getDevicePath(wwn, volumeID string) (devicePath string, err error) {

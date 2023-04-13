@@ -392,11 +392,27 @@ func removeFromScsiSubsystem(deviceName string, io ioHandler) error {
 }
 
 func RemoveMultipathDevice(device, volumeID string) error {
-	cmd := exec.Command("dmsetup", "remove", "-f", device)
-	stdoutStderr, err := cmd.CombinedOutput()
+
+	err := multipathDisableQueuing(device, volumeID)
 	if err != nil {
-		return fmt.Errorf("failed remove multipath device for vol %s: %s err: %v", volumeID, device, err)
+		return err
 	}
-	klog.Infof("output of multipath device remove commandfor vol %s: %s: %s", volumeID, device, stdoutStderr)
+
+	cmd := exec.Command("dmsetup", "remove", "-f", device)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed dmsetup remove command for vol: %s device: %s err: %v", volumeID, device, err)
+	}
+	klog.Infof("output of dmsetup remove command for vol: %s device: %s output: %s", volumeID, device, out)
+	return nil
+}
+
+// multipathDisableQueuing : disable queueing on the multipath device
+func multipathDisableQueuing(device string, volumeID string) (err error) {
+	out, err := exec.Command("dmsetup", "message", device, "0", "fail_if_no_path").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed dmsetup device fail_if_no_path command for vol: %s device: %s err: %v", volumeID, device, err)
+	}
+	klog.Infof("output of dmsetup device fail_if_no_path command for vol: %s deivce:%s output: %s", volumeID, device, out)
 	return nil
 }

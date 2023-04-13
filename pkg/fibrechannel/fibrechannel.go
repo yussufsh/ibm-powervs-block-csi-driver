@@ -159,7 +159,7 @@ func searchDisk(c Connector, io ioHandler) (string, error) {
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
 	for _, diskID := range diskIds {
 		klog.Infof("fb: starting to rescan disk with polling %s", c.VolumeName)
-		err := wait.PollImmediate(2*time.Second, 2*time.Minute, func() (bool, error) {
+		err := wait.PollImmediate(2*time.Second, 3*time.Minute, func() (bool, error) {
 			if !rescaned {
 				err := scsiHostRescan(io)
 				if err != nil {
@@ -248,12 +248,18 @@ func findDiskWWIDs(wwid, vol string, io ioHandler) (string, string) {
 					klog.Errorf("fc: failed to find a corresponding disk from vol %s, symlink[%s], error %v", vol, DevID+name, err)
 					return "", ""
 				}
-				dm, err1 := FindMultipathDeviceForDevice(disk, io, DevID+name)
-				if err1 != nil {
-					klog.Errorf("fc: failed to find a multipath disk from vol %s, symlink[%s], for %s, error %v", vol, DevID+name, disk, err)
-					return disk, ""
+				// dm, err1 := FindMultipathDeviceForDevice(disk, io, DevID+name)
+				// if err1 != nil {
+				// 	klog.Errorf("fc: failed to find a multipath disk from vol %s, symlink[%s], for %s, error %v", vol, DevID+name, disk, err)
+				// 	return disk, ""
+				// }
+
+				// we are waiting until the wwn path is a dm disk
+				// seen issues that dm disk identified instanstly is replaced by another dm path
+				if strings.HasPrefix(disk, "/dev/dm-") {
+					return disk, disk
 				}
-				return disk, dm
+				return disk, ""
 			}
 		}
 	}

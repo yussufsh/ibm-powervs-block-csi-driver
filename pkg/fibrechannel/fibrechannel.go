@@ -343,7 +343,7 @@ func detachFCDisk(devicePath string, io ioHandler) error {
 	if !strings.HasPrefix(devicePath, "/dev/") {
 		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
 	}
-	flushDevice(devicePath)
+	// flushDevice(devicePath)
 	arr := strings.Split(devicePath, "/")
 	dev := arr[len(arr)-1]
 	err := removeFromScsiSubsystem(dev, io)
@@ -373,7 +373,7 @@ func removeFromScsiSubsystem(deviceName string, io ioHandler) error {
 }
 
 func RemoveMultipathDevice(device, volumeID string) error {
-	cmd := exec.Command("multipath", "-f", device)
+	cmd := exec.Command("dmsetup", "remove", "-f", device)
 	stdoutStderr, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed remove multipath device for vol %s: %s err: %v", volumeID, device, err)

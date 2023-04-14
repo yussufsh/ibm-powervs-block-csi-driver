@@ -370,7 +370,7 @@ func detachFCDisk(devicePath string, io ioHandler) error {
 }
 
 // Flushes any outstanding I/O to the device
-func flushDevice(deviceName string) {
+func flushDevice(deviceName, vol string) {
 	out, err := exec.Command("blockdev", "--flushbufs", deviceName).CombinedOutput()
 	if err != nil {
 		// Ignore the error and continue deleting the device. There is will be no retry on error.
@@ -393,9 +393,11 @@ func removeFromScsiSubsystem(deviceName string, io ioHandler) error {
 
 func RemoveMultipathDevice(device, volumeID string) error {
 
+	flushDevice(device, volumeID)
+
 	err := multipathDisableQueuing(device, volumeID)
 	if err != nil {
-		return err
+		klog.Warningf("Failed to disable queuing %s: %v", device, err)
 	}
 
 	cmd := exec.Command("dmsetup", "remove", "-f", device)

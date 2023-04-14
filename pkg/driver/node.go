@@ -248,6 +248,9 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 			err = cleanupDevice(devicePath, volumeID)
 		}
 
+		// only if cleanupDevice is success remove from cache
+		d.clearBlockVolumeDevice(volumeID)
+
 		if err != nil {
 			return nil, err
 		}
@@ -276,6 +279,8 @@ func (d *nodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	if err != nil {
 		return nil, err
 	}
+	// only if cleanupDevice is success remove from cache
+	d.clearBlockVolumeDevice(volumeID)
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
@@ -449,11 +454,21 @@ func (d *nodeService) lookupForBlockVolumeDevice(vol string) string {
 	dev, ok := d.blockVolumeDevices[vol]
 	if ok {
 		klog.V(4).Infof("lookupForBlockVolumeDevice: found volume %s path %s in blockVolumeDevices", vol, dev)
-		delete(d.blockVolumeDevices, vol)
+		// delete(d.blockVolumeDevices, vol)
 		return dev
 	}
 	klog.V(4).Infof("lookupForBlockVolumeDevice: did not find volume %s path %s in blockVolumeDevices", vol, dev)
 	return dev
+}
+func (d *nodeService) clearBlockVolumeDevice(vol string) bool {
+	dev, ok := d.blockVolumeDevices[vol]
+	if ok {
+		klog.V(4).Infof("clearBlockVolumeDevice: found volume %s path %s in blockVolumeDevices", vol, dev)
+		delete(d.blockVolumeDevices, vol)
+		return true
+	}
+	klog.V(4).Infof("clearBlockVolumeDevice: did not find volume %s path %s in blockVolumeDevices", vol, dev)
+	return false
 }
 
 func (d *nodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {

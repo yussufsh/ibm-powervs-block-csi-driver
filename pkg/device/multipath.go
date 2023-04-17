@@ -2,11 +2,13 @@ package device
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
+
+	"k8s.io/klog"
 )
 
 const (
@@ -254,7 +256,7 @@ func deleteSdDevice(path string) (err error) {
 		// err = fmt.Errorf("path %s doesn't exist", deletePath)
 		return nil
 	}
-	err = ioutil.WriteFile(deletePath, []byte("1\n"), 0644)
+	err = os.WriteFile(deletePath, []byte("1\n"), 0644)
 	if err != nil {
 		err = fmt.Errorf("error writing to file %s : %v", deletePath, err)
 		return err
@@ -280,9 +282,10 @@ func cleanupErrorMultipathMaps() (err error) {
 			if err != nil {
 				// ignore errors and only log, as its a best effort to cleanup all error maps
 				// log.Debugf("unable to cleanup error state map %s err %s", mapName, err.Error())
+				klog.Infof("unable to cleanup error state map %s err %v", mapName, err)
 				continue
 			}
-			// log.Debugf("successfully cleaned error state map %s", mapName)
+			klog.Infof("successfully cleaned error state map %s", mapName)
 		}
 	}
 	return nil
@@ -308,8 +311,10 @@ func cleanupOrphanPaths() (err error) {
 		if err != nil {
 			// ignore errors and only log, as its a best effort to cleanup all orphan maps
 			// log.Debugf("unable to cleanup orphan state path %s err %s", orphanPath, err.Error())
+			klog.Infof("unable to cleanup orphan state path %s err %v", orphanPath, err)
 			continue
 		}
+		klog.Infof("successfully cleaned orphan state map %s", orphanPath)
 	}
 	return nil
 }
@@ -319,7 +324,7 @@ func deleteSdDeviceByHctl(h string, c string, t string, l string) (err error) {
 	deletePath := fmt.Sprintf("/sys/class/scsi_device/%s:%s:%s:%s/device/delete", h, c, t, l)
 	is, _, _ := FileExists(deletePath)
 	if is {
-		err := ioutil.WriteFile(deletePath, []byte("1"), 0644)
+		err := os.WriteFile(deletePath, []byte("1"), 0644)
 		if err != nil {
 			err = fmt.Errorf("error writing to file %s : %v", deletePath, err)
 			return err
@@ -330,6 +335,7 @@ func deleteSdDeviceByHctl(h string, c string, t string, l string) (err error) {
 
 // cleanupStaleMaps cleanup maps which are not attached to a vend/prod/rev
 func cleanupStaleMaps() (err error) {
+	klog.Info("inside cleanupStaleMaps")
 	outBytes, err := exec.Command(multipathd, showMapsFormat...).CombinedOutput()
 	if err != nil {
 		return err
@@ -340,23 +346,22 @@ func cleanupStaleMaps() (err error) {
 		err = fmt.Errorf("failed to get multipathd %v, out %s", showMapsFormat, out)
 		return err
 	}
-	r, err := regexp.Compile("(?m)^.*##,##$")
+	r, err := regexp.Compile("(?m)^.*##,##")
 	if err != nil {
 		return err
 	}
 	// split on new lines'
 	staleMultipaths := r.FindAllString(out, -1)
-
+	klog.Infof("inside cleanupStaleMaps: found %d stale paths", len(staleMultipaths))
 	for _, line := range staleMultipaths {
 		entry := strings.Fields(line)
 		args := []string{"remove", "--force", entry[2]} // entry[2]: map name
 		_, err := exec.Command(dmsetupcommand, args...).CombinedOutput()
 		if err != nil {
-			// ignore errors and only log, as its a best effort to cleanup all stale maps
-			// log.Debugf("unable to cleanup error state map %s err %s", mapName, err.Error())
+			klog.Infof("unable to cleanup error state map %s err %v", entry[2], err)
 			continue
 		}
-		// log.Debugf("successfully cleaned error state map %s", mapName)
+		klog.Infof("successfully cleaned stale state map %s", entry[2])
 	}
 	return nil
 }
@@ -381,8 +386,10 @@ func cleanupFaultyPaths() (err error) {
 		if err != nil {
 			// ignore errors and only log, as its a best effort to cleanup all orphan maps
 			// log.Debugf("unable to cleanup orphan state path %s err %s", orphanPath, err.Error())
+			klog.Infof("unable to cleanup faulty state path %s:%s:%s:%s err %v", result["host"], result["channel"], result["target"], result["lun"], err)
 			continue
 		}
+		klog.Infof("successfully cleaned faulty state path %s:%s:%s:%s", result["host"], result["channel"], result["target"], result["lun"])
 	}
 	return nil
 }

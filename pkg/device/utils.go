@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,7 +73,7 @@ func WriteData(dir string, fileName string, data interface{}) error {
 	}
 
 	// Write to file
-	err = ioutil.WriteFile(dataFilePath, jsonData, 0600)
+	err = os.WriteFile(dataFilePath, jsonData, 0600)
 	if err != nil {
 		return err
 	}
@@ -86,14 +85,14 @@ func ReadData(dir, fileName string) ([]byte, error) {
 	dataFilePath := filepath.Join(dir, fileName)
 	exists, _, err := FileExists(dataFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to check if device info file %s exists, %v", dataFilePath, err.Error())
+		return nil, fmt.Errorf("failed to check if device info file %s exists, %v", dataFilePath, err.Error())
 	}
 	if !exists {
 		return nil, fmt.Errorf("Device info file %s does not exist", dataFilePath)
 	}
 
 	// Read from file
-	deviceInfo, err := ioutil.ReadFile(dataFilePath)
+	deviceInfo, err := os.ReadFile(dataFilePath)
 	if err != nil {
 		return nil, err
 	}

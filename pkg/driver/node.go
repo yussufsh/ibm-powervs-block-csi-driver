@@ -72,8 +72,6 @@ type nodeService struct {
 	pvmInstanceId string
 	volumeLocks   *util.VolumeLocks
 	stats         StatsUtils
-	// TODO: Instead of map use file storage
-	blockVolumeDevices map[string]string
 }
 
 // newNodeService creates a new node service
@@ -91,13 +89,12 @@ func newNodeService(driverOptions *Options) nodeService {
 	}
 
 	return nodeService{
-		cloud:              pvsCloud,
-		mounter:            mountmanager.NewNodeMounter(),
-		driverOptions:      driverOptions,
-		pvmInstanceId:      metadata.GetPvmInstanceId(),
-		volumeLocks:        util.NewVolumeLocks(),
-		stats:              &VolumeStatUtils{},
-		blockVolumeDevices: make(map[string]string),
+		cloud:         pvsCloud,
+		mounter:       mountmanager.NewNodeMounter(),
+		driverOptions: driverOptions,
+		pvmInstanceId: metadata.GetPvmInstanceId(),
+		volumeLocks:   util.NewVolumeLocks(),
+		stats:         &VolumeStatUtils{},
 	}
 }
 
@@ -290,7 +287,7 @@ func (d *nodeService) stageVolume(wwn string, req *csi.NodeStageVolumeRequest) (
 
 	// FormatAndMount will format only if needed
 	klog.V(5).Infof("NodeStageVolume: starting formatting %s and mounting at %s with fstype %s for wwn %s", source, target, fsType, wwn)
-	err = d.mounter.GetSafeFormatAndMount().FormatAndMount(dev.Mapper, target, fsType, mountOptions)
+	err = d.mounter.GetSafeFormatAndMount().FormatAndMount(source, target, fsType, mountOptions)
 	if err != nil {
 		msg := fmt.Sprintf("could not format %q and mnt it at %q for wwn %s with err %v", source, target, wwn, err)
 		return nil, status.Error(codes.Internal, msg)
@@ -742,10 +739,6 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 		return status.Errorf(codes.Internal, "Could not mount %q at %q for vol %s: %v", source, target, volumeID, err)
 	}
 
-	// FIX: storage the block devices in a map to clean up during UnpublishVolume.
-	klog.V(5).Infof("NodePublishVolume [block]: storing device %s into blockVolumeDevices for vol %s", source, volumeID)
-	d.blockVolumeDevices[volumeID] = source
-
 	return nil
 }
 
@@ -767,11 +760,11 @@ func (d *nodeService) nodePublishVolumeForFileSystem(req *csi.NodePublishVolumeR
 		return status.Errorf(codes.Internal, "Could not create dir %q for vol %s: %v", target, volumeID, err)
 	}
 
-	fsType := "" // Let the fsType be derived from global mount(NodeStageVolume)
-	// fsType :=  mode.Mount.GetFsType()
-	// if len(fsType) == 0 {
-	// 	fsType = defaultFsType
-	// }
+	// fsType := "" // Let the fsType be derived from global mount(NodeStageVolume)
+	fsType := mode.Mount.GetFsType()
+	if len(fsType) == 0 {
+		fsType = defaultFsType
+	}
 
 	klog.V(5).Infof("NodePublishVolume: started mounting %s at %s with option %s as fstype %s for vol %s", source, target, mountOptions, fsType, volumeID)
 	if err := d.mounter.Mount(source, target, fsType, mountOptions); err != nil {

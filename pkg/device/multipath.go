@@ -14,14 +14,18 @@ const (
 	multipathd         = "multipathd"
 	dmsetupcommand     = "dmsetup"
 	majorMinorPattern  = "(.*)\\((?P<Major>\\d+),\\s+(?P<Minor>\\d+)\\)"
+	orphanPathsPattern = ".*\\s+(?P<host>\\d+):(?P<channel>\\d+):(?P<target>\\d+):(?P<lun>\\d+).*orphan"
+	faultyPathsPattern = ".*failed.*(?P<host>\\d+):(?P<channel>\\d+):(?P<target>\\d+):(?P<lun>\\d+).*faulty"
 	errorMapPattern    = "((?P<mapname>.*):.*error)"
 	deviceDoesNotExist = "No such device or address"
 )
 
 var (
-	showPathsFormat = []string{"show", "paths", "format", "%w %d %t %i %o %T %z %s %m"}
-	showMapsFormat  = []string{"show", "maps", "format", "%w %d %n %s"}
-	errorMapRegex   = regexp.MustCompile(errorMapPattern)
+	showPathsFormat  = []string{"show", "paths", "format", "%w %d %t %i %o %T %z %s %m"}
+	showMapsFormat   = []string{"show", "maps", "format", "%w %d %n %s"}
+	errorMapRegex    = regexp.MustCompile(errorMapPattern)
+	orphanPathRegexp = regexp.MustCompile(orphanPathsPattern)
+	faultyPathRegexp = regexp.MustCompile(faultyPathsPattern)
 )
 
 // PathInfo :
@@ -123,7 +127,6 @@ func multipathdShowCmd(wwid string, args []string) (output []string, err error) 
 	}
 	r, err := regexp.Compile("(?m)^.*" + wwid + ".*$")
 	if err != nil {
-
 		return nil, err
 	}
 	// split on new lines'
@@ -260,7 +263,7 @@ func deleteSdDevice(path string) (err error) {
 }
 
 func cleanupErrorMultipathMaps() (err error) {
-	// run dmsetup table ls and fetch error maps
+	// run dmsetup table and fetch error maps
 	args := []string{"table"}
 	outBytes, err := exec.Command(dmsetupcommand, args...).CombinedOutput()
 	if err != nil {
@@ -280,6 +283,105 @@ func cleanupErrorMultipathMaps() (err error) {
 				continue
 			}
 			// log.Debugf("successfully cleaned error state map %s", mapName)
+		}
+	}
+	return nil
+}
+
+func cleanupOrphanPaths() (err error) {
+	// run multipathd show paths and fetch orphan maps
+	outBytes, err := exec.Command(multipathd, showPathsFormat...).CombinedOutput()
+	if err != nil {
+		return err
+	}
+	out := string(outBytes)
+	// rc can be 0 on the below error conditions as well
+	if isMultipathTimeoutError(out) {
+		err = fmt.Errorf("failed to get multipathd %v, out %s", showPathsFormat, out)
+		return err
+	}
+
+	listOrphanPaths := orphanPathRegexp.FindAllString(out, -1)
+	for _, orphanPath := range listOrphanPaths {
+		result := findStringSubmatchMap(orphanPath, orphanPathRegexp)
+		err := deleteSdDeviceByHctl(result["host"], result["channel"], result["target"], result["lun"])
+		if err != nil {
+			// ignore errors and only log, as its a best effort to cleanup all orphan maps
+			// log.Debugf("unable to cleanup orphan state path %s err %s", orphanPath, err.Error())
+			continue
+		}
+	}
+	return nil
+}
+
+// nolint as we want to keep updatePathSerialByHctl separate
+func deleteSdDeviceByHctl(h string, c string, t string, l string) (err error) {
+	deletePath := fmt.Sprintf("/sys/class/scsi_device/%s:%s:%s:%s/device/delete", h, c, t, l)
+	is, _, _ := FileExists(deletePath)
+	if is {
+		err := ioutil.WriteFile(deletePath, []byte("1"), 0644)
+		if err != nil {
+			err = fmt.Errorf("error writing to file %s : %v", deletePath, err)
+			return err
+		}
+	}
+	return nil
+}
+
+// cleanupStaleMaps cleanup maps which are not attached to a vend/prod/rev
+func cleanupStaleMaps() (err error) {
+	outBytes, err := exec.Command(multipathd, showMapsFormat...).CombinedOutput()
+	if err != nil {
+		return err
+	}
+	out := string(outBytes)
+	// rc can be 0 on the below error conditions as well
+	if isMultipathTimeoutError(out) {
+		err = fmt.Errorf("failed to get multipathd %v, out %s", showMapsFormat, out)
+		return err
+	}
+	r, err := regexp.Compile("(?m)^.*##,##$")
+	if err != nil {
+		return err
+	}
+	// split on new lines'
+	staleMultipaths := r.FindAllString(out, -1)
+
+	for _, line := range staleMultipaths {
+		entry := strings.Fields(line)
+		args := []string{"remove", "--force", entry[2]} // entry[2]: map name
+		_, err := exec.Command(dmsetupcommand, args...).CombinedOutput()
+		if err != nil {
+			// ignore errors and only log, as its a best effort to cleanup all stale maps
+			// log.Debugf("unable to cleanup error state map %s err %s", mapName, err.Error())
+			continue
+		}
+		// log.Debugf("successfully cleaned error state map %s", mapName)
+	}
+	return nil
+}
+
+func cleanupFaultyPaths() (err error) {
+	// run multipathd show paths and fetch orphan maps
+	outBytes, err := exec.Command(multipathd, showPathsFormat...).CombinedOutput()
+	if err != nil {
+		return err
+	}
+	out := string(outBytes)
+	// rc can be 0 on the below error conditions as well
+	if isMultipathTimeoutError(out) {
+		err = fmt.Errorf("failed to get multipathd %v, out %s", showPathsFormat, out)
+		return err
+	}
+
+	listFaultyPaths := faultyPathRegexp.FindAllString(out, -1)
+	for _, faultyPath := range listFaultyPaths {
+		result := findStringSubmatchMap(faultyPath, faultyPathRegexp)
+		err := deleteSdDeviceByHctl(result["host"], result["channel"], result["target"], result["lun"])
+		if err != nil {
+			// ignore errors and only log, as its a best effort to cleanup all orphan maps
+			// log.Debugf("unable to cleanup orphan state path %s err %s", orphanPath, err.Error())
+			continue
 		}
 	}
 	return nil

@@ -266,7 +266,12 @@ func createLinuxDevice(wwn string) (dev *Device, err error) {
 				return d, nil
 			}
 		}
-		// TODO:  handle remapped luns, orphan paths,
+		// handle faulty maps
+		cleanupFaultyPaths()
+		// handle stale maps
+		cleanupStaleMaps()
+		// handle orphan paths
+		cleanupOrphanPaths()
 		// handle error mappers
 		cleanupErrorMultipathMaps()
 

@@ -266,14 +266,8 @@ func (d *nodeService) stageVolume(wwn string, req *csi.NodeStageVolumeRequest) (
 	}
 	klog.V(5).Infof("completed formatting %s and mounting at %s for volumeID %s with fstype %s", source, target, req.VolumeId, fsType)
 
-	// populate mount info in the staging device
-	mountInfo := &device.Mount{
-		Mountpoint: target,
-		Options:    mountOptions,
-		Device:     *dev,
-		FSType:     fsType,
-	}
-	stagingDevice.MountInfo = mountInfo
+	// mark the staging device as mounted
+	stagingDevice.IsMounted = true
 
 	return stagingDevice, nil
 }
@@ -327,7 +321,7 @@ func (d *nodeService) nodeUnstageVolume(req *csi.NodeUnstageVolumeRequest) error
 	}
 
 	// If mounted, then unmount the filesystem
-	if stagingDev.VolumeAccessMode == "mount" && stagingDev.MountInfo != nil {
+	if stagingDev.VolumeAccessMode == "mount" && stagingDev.IsMounted {
 		klog.V(5).Infof("starting unmounting %s", target, "volumeID", volumeID)
 		err := d.mounter.Unmount(target)
 		if err != nil {

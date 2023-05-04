@@ -57,15 +57,7 @@ type StagingDevice struct {
 	VolumeID         string      `json:"volume_id"`
 	VolumeAccessMode string      `json:"volume_access_mode"` // block or mount
 	Device           LinuxDevice `json:"device"`
-	MountInfo        *Mount      `json:"mount_info,omitempty"`
-}
-
-// Mount struct
-type Mount struct {
-	Mountpoint string      `json:"Mountpoint,omitempty"`
-	Options    []string    `json:"Options,omitempty"`
-	Device     LinuxDevice `json:"device,omitempty"`
-	FSType     string      `json:"fstype,omitempty"`
+	IsMounted        bool
 }
 
 func NewLinuxDevice(wwn string) LinuxDevice {
@@ -259,7 +251,8 @@ func scsiHostRescan() error {
 func ReadData(devPath string) (bool, *StagingDevice) {
 	isFileExist, _, _ := fileExists(devPath, deviceInfoFileName)
 	if isFileExist {
-		stgDev, _ := readData(devPath, deviceInfoFileName)
+		stgDev, err := readData(devPath, deviceInfoFileName)
+		klog.Warning(err)
 		return true, stgDev
 	}
 	return false, nil

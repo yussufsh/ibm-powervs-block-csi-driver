@@ -348,7 +348,7 @@ func (d *nodeService) nodeUnstageVolume(req *csi.NodeUnstageVolumeRequest) error
 		return status.Error(codes.Internal, fmt.Sprintf("error deleting device %s for volumeID %s: %v", dev.GetMapper(), volumeID, err))
 	}
 	// Remove the device file
-	WriteData(target, nil)
+	_ = WriteData(target, nil)
 
 	return nil
 }

@@ -215,7 +215,7 @@ func (d *nodeService) stageVolume(wwn string, req *csi.NodeStageVolumeRequest) (
 	// Construct staging device to be stored in the staging path on the node
 	stagingDevice := &device.StagingDevice{
 		VolumeID:         req.VolumeId,
-		Device:           dev,
+		Device:           *dev,
 		VolumeAccessMode: "mount",
 	}
 
@@ -270,7 +270,7 @@ func (d *nodeService) stageVolume(wwn string, req *csi.NodeStageVolumeRequest) (
 	mountInfo := &device.Mount{
 		Mountpoint: target,
 		Options:    mountOptions,
-		Device:     dev,
+		Device:     *dev,
 		FSType:     fsType,
 	}
 	stagingDevice.MountInfo = mountInfo
@@ -321,7 +321,7 @@ func (d *nodeService) nodeUnstageVolume(req *csi.NodeUnstageVolumeRequest) error
 
 	klog.Infof("found staged device info: %+v", stagingDev)
 
-	dev := *stagingDev.Device
+	dev := stagingDev.Device
 	if dev == nil {
 		return status.Error(codes.Internal, fmt.Sprintf("missing device info in the staging device %v for volumeID %s", stagingDev, volumeID))
 	}
@@ -329,7 +329,7 @@ func (d *nodeService) nodeUnstageVolume(req *csi.NodeUnstageVolumeRequest) error
 	// If mounted, then unmount the filesystem
 	if stagingDev.VolumeAccessMode == "mount" && stagingDev.MountInfo != nil {
 		klog.V(5).Infof("starting unmounting %s", target, "volumeID", volumeID)
-		err := mount.CleanupMountPoint(target, d.mounter, true)
+		err := d.mounter.Unmount(target)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to unmount for vol %s target %q: %v", volumeID, target, err)
 		}
@@ -499,7 +499,7 @@ func (d *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	defer d.volumeLocks.Release(volumeID)
 
 	klog.V(5).Infof("starting unmounting %s for volumeID %s", target, volumeID)
-	err := mount.CleanupMountPoint(target, d.mounter, false)
+	err := d.mounter.Unmount(target)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not unmount %q for volumeID %s volumeID: %v", target, volumeID, err)
 	}
@@ -636,7 +636,7 @@ func (d *nodeService) nodePublishVolumeForBlock(req *csi.NodePublishVolumeReques
 			fmt.Sprintf("staging device is not configured at the staging path %s for volumeID %s", target, volumeID))
 	}
 
-	source := (*stagingDev.Device).GetMapper()
+	source := stagingDev.Device.GetMapper()
 	klog.V(4).Infof("[block]: found device path for volumeID %s -> %s", volumeID, source)
 
 	// create the global mount path if it is missing

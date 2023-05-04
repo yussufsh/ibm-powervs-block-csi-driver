@@ -94,7 +94,7 @@ func multipathGetPathsOfDevice(dev *Device, needActivePath bool) (paths []*PathI
 	if len(lines) == 0 && dev != nil && dev.WWID != "" {
 		return nil, nil
 	}
-	klog.Infof("o/p of multipathd show paths:", lines)
+
 	for _, line := range lines {
 		if strings.Contains(line, dev.WWID) {
 			entry := strings.Fields(line)
@@ -154,8 +154,6 @@ func tearDownMultipathDevice(dev *Device) (err error) {
 	if err != nil {
 		return err
 	}
-
-	klog.Infof("o/p of multipathd show maps:", lines)
 
 	for _, line := range lines {
 		if strings.Contains(line, dev.WWID) {
@@ -387,8 +385,6 @@ func cleanupStalePaths() (err error) {
 		klog.Info(err)
 		return err
 	}
-
-	klog.Infof("o/p of multipathd show paths:", allMaps)
 
 	scsiPath := "/sys/class/scsi_device/"
 	if dirs, err := os.ReadDir(scsiPath); err == nil {

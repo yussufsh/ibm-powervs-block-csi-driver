@@ -54,18 +54,18 @@ type Device struct {
 
 // StagingDevice represents the device information that is stored in the staging area.
 type StagingDevice struct {
-	VolumeID         string       `json:"volume_id"`
-	VolumeAccessMode string       `json:"volume_access_mode"` // block or mount
-	Device           *LinuxDevice `json:"device"`
-	MountInfo        *Mount       `json:"mount_info,omitempty"`
+	VolumeID         string      `json:"volume_id"`
+	VolumeAccessMode string      `json:"volume_access_mode"` // block or mount
+	Device           LinuxDevice `json:"device"`
+	MountInfo        *Mount      `json:"mount_info,omitempty"`
 }
 
 // Mount struct
 type Mount struct {
-	Mountpoint string       `json:"Mountpoint,omitempty"`
-	Options    []string     `json:"Options,omitempty"`
-	Device     *LinuxDevice `json:"device,omitempty"`
-	FSType     string       `json:"fstype,omitempty"`
+	Mountpoint string      `json:"Mountpoint,omitempty"`
+	Options    []string    `json:"Options,omitempty"`
+	Device     LinuxDevice `json:"device,omitempty"`
+	FSType     string      `json:"fstype,omitempty"`
 }
 
 func NewLinuxDevice(wwn string) LinuxDevice {

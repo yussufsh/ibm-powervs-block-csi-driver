@@ -700,13 +700,11 @@ func (d *nodeService) setupDevice(wwn string) (*device.LinuxDevice, error) {
 	if err := dev.Populate(false); err != nil {
 		return nil, err
 	}
-	if dev.GetMapper() != "" {
-		// cleanup existing device so we can find it again fresh
-		if err := dev.DeleteDevice(); err != nil {
-			klog.Warningf("failed to cleanup stale device before staging for WWN %s, err %v", wwn, err)
-		}
-	}
 
+	// Populate will ensure atleast 1 active path exist for the mapper
+	if dev.GetMapper() != "" {
+		return &dev, nil
+	}
 	// Create Device
 	err := dev.CreateDevice()
 	if err != nil {

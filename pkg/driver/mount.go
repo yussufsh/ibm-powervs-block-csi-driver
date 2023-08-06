@@ -19,66 +19,66 @@ package driver
 import (
 	"fmt"
 	"os"
-	goexec "os/exec"
+	"strconv"
+	"strings"
 
-	"k8s.io/klog/v2"
+	"k8s.io/mount-utils"
+	mountutils "k8s.io/mount-utils"
 	"k8s.io/utils/exec"
-	"k8s.io/utils/mount"
-	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/fibrechannel"
 )
 
 // Mounter is an interface for mount operations
 type Mounter interface {
 	mount.Interface
-	exec.Interface
-	FormatAndMount(source string, target string, fstype string, options []string) error
-	GetDeviceName(mountPath string) (string, int, error)
-	MakeFile(pathname string) error
-	MakeDir(pathname string) error
-	ExistsPath(filename string) (bool, error)
-	RescanSCSIBus() error
-	GetDevicePath(wwn string) (string, error)
+
+	FormatAndMountSensitiveWithFormatOptions(source string, target string, fstype string, options []string, sensitiveOptions []string, formatOptions []string) error
+	IsCorruptedMnt(err error) bool
+	GetDeviceNameFromMount(mountPath string) (string, int, error)
+	MakeFile(path string) error
+	MakeDir(path string) error
+	PathExists(path string) (bool, error)
+	NeedResize(devicePath string, deviceMountPath string) (bool, error)
+	Unpublish(path string) error
+	Unstage(path string) error
+	NewResizeFs() (Resizefs, error)
+}
+
+type Resizefs interface {
+	Resize(devicePath, deviceMountPath string) (bool, error)
 }
 
 type NodeMounter struct {
-	mount.SafeFormatAndMount
-	exec.Interface
+	*mount.SafeFormatAndMount
 }
 
 func newNodeMounter() Mounter {
 	return &NodeMounter{
-		mount.SafeFormatAndMount{
+		&mount.SafeFormatAndMount{
 			Interface: mount.New(""),
 			Exec:      exec.New(),
 		},
-		exec.New(),
 	}
 }
 
-func (m *NodeMounter) RescanSCSIBus() error {
-	cmd := goexec.Command("/usr/bin/rescan-scsi-bus.sh")
-	stdoutStderr, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to rescan-scsi-bus.sh: %v", err)
-	}
-	klog.V(5).Infof("output of rescan-scsi-bus.sh: %s", stdoutStderr)
-	return nil
+// FormatAndMountSensitiveWithFormatOptions formats the given disk.
+func (m NodeMounter) FormatAndMountSensitiveWithFormatOptions(source string, target string, fstype string, options []string, sensitiveOptions []string, formatOptions []string) error {
+	return m.FormatAndMountSensitiveWithFormatOptions(source, target, fstype, options, sensitiveOptions, formatOptions)
 }
 
-func (m *NodeMounter) GetDevicePath(wwn string) (devicePath string, err error) {
-	c := fibrechannel.Connector{}
-	// Prepending the 3 which is missing in the wwn getting it from the PowerVS infra
-	c.WWIDs = []string{"3" + wwn}
-
-	return fibrechannel.Attach(c, &fibrechannel.OSioHandler{})
-}
-
-func (m *NodeMounter) GetDeviceName(mountPath string) (string, int, error) {
+// GetDeviceNameFromMount returns the volume ID for a mount path.
+func (m NodeMounter) GetDeviceNameFromMount(mountPath string) (string, int, error) {
 	return mount.GetDeviceNameFromMount(m, mountPath)
 }
 
-func (m *NodeMounter) MakeFile(pathname string) error {
-	f, err := os.OpenFile(pathname, os.O_CREATE, os.FileMode(0644))
+// IsCorruptedMnt return true if err is about corrupted mount point
+func (m NodeMounter) IsCorruptedMnt(err error) bool {
+	return mount.IsCorruptedMnt(err)
+}
+
+// This function is mirrored in ./sanity_test.go to make sure sanity test covered this block of code
+// Please mirror the change to func MakeFile in ./sanity_test.go
+func (m *NodeMounter) MakeFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE, os.FileMode(0644))
 	if err != nil {
 		if !os.IsExist(err) {
 			return err
@@ -90,8 +90,10 @@ func (m *NodeMounter) MakeFile(pathname string) error {
 	return nil
 }
 
-func (m *NodeMounter) MakeDir(pathname string) error {
-	err := os.MkdirAll(pathname, os.FileMode(0755))
+// This function is mirrored in ./sanity_test.go to make sure sanity test covered this block of code
+// Please mirror the change to func MakeFile in ./sanity_test.go
+func (m *NodeMounter) MakeDir(path string) error {
+	err := os.MkdirAll(path, os.FileMode(0755))
 	if err != nil {
 		if !os.IsExist(err) {
 			return err
@@ -100,11 +102,85 @@ func (m *NodeMounter) MakeDir(pathname string) error {
 	return nil
 }
 
-func (m *NodeMounter) ExistsPath(filename string) (bool, error) {
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		return false, nil
-	} else if err != nil {
-		return false, err
+// This function is mirrored in ./sanity_test.go to make sure sanity test covered this block of code
+// Please mirror the change to func MakeFile in ./sanity_test.go
+func (m *NodeMounter) PathExists(path string) (bool, error) {
+	return mount.PathExists(path)
+}
+
+func (m *NodeMounter) NeedResize(devicePath string, deviceMountPath string) (bool, error) {
+	return mount.NewResizeFs(m.Exec).NeedResize(devicePath, deviceMountPath)
+}
+
+func (m *NodeMounter) getExtSize(devicePath string) (uint64, uint64, error) {
+	output, err := m.SafeFormatAndMount.Exec.Command("dumpe2fs", "-h", devicePath).CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to read size of filesystem on %s: %w: %s", devicePath, err, string(output))
 	}
-	return true, nil
+
+	blockSize, blockCount, _ := m.parseFsInfoOutput(string(output), ":", "block size", "block count")
+
+	if blockSize == 0 {
+		return 0, 0, fmt.Errorf("could not find block size of device %s", devicePath)
+	}
+	if blockCount == 0 {
+		return 0, 0, fmt.Errorf("could not find block count of device %s", devicePath)
+	}
+	return blockSize, blockSize * blockCount, nil
+}
+
+func (m *NodeMounter) getXFSSize(devicePath string) (uint64, uint64, error) {
+	output, err := m.SafeFormatAndMount.Exec.Command("xfs_io", "-c", "statfs", devicePath).CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to read size of filesystem on %s: %w: %s", devicePath, err, string(output))
+	}
+
+	blockSize, blockCount, _ := m.parseFsInfoOutput(string(output), "=", "geom.bsize", "geom.datablocks")
+
+	if blockSize == 0 {
+		return 0, 0, fmt.Errorf("could not find block size of device %s", devicePath)
+	}
+	if blockCount == 0 {
+		return 0, 0, fmt.Errorf("could not find block count of device %s", devicePath)
+	}
+	return blockSize, blockSize * blockCount, nil
+}
+
+func (m *NodeMounter) parseFsInfoOutput(cmdOutput string, spliter string, blockSizeKey string, blockCountKey string) (uint64, uint64, error) {
+	lines := strings.Split(cmdOutput, "\n")
+	var blockSize, blockCount uint64
+	var err error
+
+	for _, line := range lines {
+		tokens := strings.Split(line, spliter)
+		if len(tokens) != 2 {
+			continue
+		}
+		key, value := strings.ToLower(strings.TrimSpace(tokens[0])), strings.ToLower(strings.TrimSpace(tokens[1]))
+		if key == blockSizeKey {
+			blockSize, err = strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to parse block size %s: %w", value, err)
+			}
+		}
+		if key == blockCountKey {
+			blockCount, err = strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to parse block count %s: %w", value, err)
+			}
+		}
+	}
+	return blockSize, blockCount, err
+}
+
+func (m *NodeMounter) Unpublish(path string) error {
+	return mount.CleanupMountPoint(path, m, false)
+}
+
+func (m *NodeMounter) Unstage(path string) error {
+	return mount.CleanupMountPoint(path, m, false)
+}
+
+func (m *NodeMounter) NewResizeFs() (Resizefs, error) {
+	return mountutils.NewResizeFs(m.Exec), nil
 }

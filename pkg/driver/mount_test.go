@@ -39,7 +39,7 @@ func TestMakeDir(t *testing.T) {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
 
-	if exists, err := mountObj.ExistsPath(targetPath); !exists {
+	if exists, err := mountObj.PathExists(targetPath); !exists {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
 }
@@ -55,7 +55,6 @@ func TestMakeFile(t *testing.T) {
 	targetPath := filepath.Join(dir, "targetfile")
 
 	mountObj := newNodeMounter()
-
 	if mountObj.MakeFile(targetPath) != nil {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
@@ -64,13 +63,13 @@ func TestMakeFile(t *testing.T) {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
 
-	if exists, err := mountObj.ExistsPath(targetPath); !exists {
+	if exists, err := mountObj.PathExists(targetPath); !exists {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
 
 }
 
-func TestExistsPath(t *testing.T) {
+func TestPathExists(t *testing.T) {
 	// Setup the full driver and its environment
 	dir, err := os.MkdirTemp("", "mount-powervs-csi")
 	if err != nil {
@@ -82,7 +81,7 @@ func TestExistsPath(t *testing.T) {
 
 	mountObj := newNodeMounter()
 
-	exists, err := mountObj.ExistsPath(targetPath)
+	exists, err := mountObj.PathExists(targetPath)
 
 	if err != nil {
 		t.Fatalf("Expect no error but got: %v", err)
@@ -106,7 +105,7 @@ func TestGetDeviceName(t *testing.T) {
 
 	mountObj := newNodeMounter()
 
-	if _, _, err := mountObj.GetDeviceName(targetPath); err != nil {
+	if _, _, err := mountObj.GetDeviceNameFromMount(targetPath); err != nil {
 		t.Fatalf("Expect no error but got: %v", err)
 	}
 

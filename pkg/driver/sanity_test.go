@@ -12,8 +12,8 @@ import (
 
 	"github.com/IBM-Cloud/power-go-client/power/models"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	"k8s.io/utils/exec"
-	"k8s.io/utils/mount"
+	"k8s.io/mount-utils"
+	mount_utils "k8s.io/mount-utils"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/cloud"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/util"
 )
@@ -264,22 +264,19 @@ func (c *fakeCloudProvider) ResizeDisk(volumeID string, newSize int64) (int64, e
 }
 
 type fakeMounter struct {
-	mount.SafeFormatAndMount
-	exec.Interface
+	mount_utils.Interface
 }
 
 func newFakeMounter() *fakeMounter {
-	return &fakeMounter{
-		mount.SafeFormatAndMount{
-			Interface: mount.New(""),
-			Exec:      exec.New(),
-		},
-		exec.New(),
-	}
+	return &fakeMounter{}
 }
 
 func (f *fakeMounter) IsCorruptedMnt(err error) bool {
 	return false
+}
+
+func (f *fakeMounter) IsMountPoint(file string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeMounter) Mount(source string, target string, fstype string, options []string) error {
@@ -293,11 +290,25 @@ func (f *fakeMounter) MountSensitive(source string, target string, fstype string
 func (f *fakeMounter) MountSensitiveWithoutSystemd(source string, target string, fstype string, options []string, sensitiveOptions []string) error {
 	return nil
 }
-func (f *fakeMounter) RescanSCSIBus() error {
+
+func (f *fakeMounter) MountSensitiveWithoutSystemdWithMountFlags(source string, target string, fstype string, options []string, sensitiveOptions []string, mountFlags []string) error {
 	return nil
 }
+
 func (f *fakeMounter) Unmount(target string) error {
 	return nil
+}
+
+func (f *fakeMounter) Unstage(target string) error {
+	return nil
+}
+
+func (f *fakeMounter) Unpublish(target string) error {
+	return nil
+}
+
+func (f *fakeMounter) NewResizeFs() (Resizefs, error) {
+	return nil, nil
 }
 
 func (f *fakeMounter) List() ([]mount.MountPoint, error) {
@@ -312,7 +323,7 @@ func (f *fakeMounter) GetMountRefs(pathname string) ([]string, error) {
 	return []string{}, nil
 }
 
-func (f *fakeMounter) FormatAndMount(source string, target string, fstype string, options []string) error {
+func (f *fakeMounter) FormatAndMountSensitiveWithFormatOptions(source string, target string, fstype string, options []string, sensitiveOptions []string, formatOptions []string) error {
 	return nil
 }
 
@@ -343,7 +354,7 @@ func (f *fakeMounter) MakeDir(pathname string) error {
 	return nil
 }
 
-func (f *fakeMounter) ExistsPath(filename string) (bool, error) {
+func (f *fakeMounter) PathExists(filename string) (bool, error) {
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		return false, nil
 	} else if err != nil {
@@ -354,12 +365,4 @@ func (f *fakeMounter) ExistsPath(filename string) (bool, error) {
 
 func (f *fakeMounter) NeedResize(source string, path string) (bool, error) {
 	return false, nil
-}
-
-func (f *fakeMounter) GetDeviceName(mountPath string) (string, int, error) {
-	return mount.GetDeviceNameFromMount(f, mountPath)
-}
-
-func (f *fakeMounter) GetDevicePath(wwn string) (devicePath string, err error) {
-	return wwn, nil
 }

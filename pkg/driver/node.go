@@ -288,22 +288,22 @@ func (d *nodeService) nodeUnstageVolume(req *csi.NodeUnstageVolumeRequest) error
 		return status.Errorf(codes.Internal, "failed to get device for vol %s target %q: %v", volumeID, stagingTarget, err)
 	}
 	if count == 0 {
-		klog.V(5).Infof("volume %s not in staged state as the device is not mounted", volumeID, stagingTarget)
+		klog.V(5).Infof("volume %s not in staged state as the device is not mounted", volumeID)
 		return nil
 	}
 
 	klog.V(5).Infof("found staged device: %s", deviceName)
 
 	// If mounted, then unmount the filesystem
-	klog.V(5).Infof("starting unmounting %s", stagingTarget, "volumeID", volumeID)
+	klog.V(5).Infof("starting unmounting %s for volumeID %s", stagingTarget, volumeID)
 	err = d.mounter.Unmount(stagingTarget)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to unmount for vol %s target %q: %v", volumeID, stagingTarget, err)
 	}
-	klog.V(5).Infof("completed unmounting %s", stagingTarget, "volumeID", volumeID)
+	klog.V(5).Infof("completed unmounting %s for volumeID %s", stagingTarget, volumeID)
 
 	// Delete device
-	klog.V(5).Infof("deleting device %s", deviceName, "volumeID", volumeID)
+	klog.V(5).Infof("deleting device %s for volumeID %s", deviceName, volumeID)
 	//check if device is mounted or has holders
 	isDirMounted, err := d.mounter.IsMountPoint(stagingTarget)
 	if err != nil {
@@ -378,7 +378,7 @@ func (d *nodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	// Noop for block NodeExpandVolume.
 	if isBlock {
-		klog.V(4).Infof("NodeExpandVolume: ignoring as given volume path is a block device", "volumeID", volumeID, "volumePath", volumePath)
+		klog.V(4).Infof("NodeExpandVolume: ignoring as given volume %s at path %s is a block device", volumeID, volumePath)
 		return &csi.NodeExpandVolumeResponse{}, nil
 	}
 
@@ -391,7 +391,7 @@ func (d *nodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.Internal, "volume path %s volumeID %s is not mounted", volumePath, volumeID)
 	}
 
-	devicePath, _, err := mount.GetDeviceNameFromMount(d.mounter, volumePath)
+	devicePath, _, err := d.mounter.GetDeviceName(volumePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get device from volume path %s volumeID %s: %v", volumePath, volumeID, err)
 	}

@@ -2,7 +2,7 @@
 This example shows how to configure Kubernetes storageclass to provision PowerVS volumes with various configuration parameters. IBM PowerVS Block CSI Driver is compatiable with in-tree PowerVS plugin on StorageClass parameters. 
 
 ## Usage
-1. Edit the StorageClass spec in [example manifest](./specs/example.yaml) and update storageclass parameters to desired value. In this example, a `tier1` PowerVS volume will be created and formatted to `xfs` filesystem.
+1. Edit the StorageClass spec in [example manifest](./specs/example.yaml) and update storageclass parameters to desired value. In this example, a `tier3` PowerVS volume will be created and formatted to `xfs` filesystem.
 
 2. Deploy the example:
 ```sh

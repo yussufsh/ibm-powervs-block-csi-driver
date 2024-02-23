@@ -134,7 +134,7 @@ func (p *powerVSCloud) CreateDisk(volumeName string, diskOptions *DiskOptions) (
 	capacityGiB := util.BytesToGiB(diskOptions.CapacityBytes)
 
 	switch diskOptions.VolumeType {
-	case VolumeTypeTier1, VolumeTypeTier3:
+	case VolumeTypeTier0, VolumeTypeTier1, VolumeTypeTier3, VolumeTypeTier5k:
 		volumeType = diskOptions.VolumeType
 	case "":
 		volumeType = DefaultVolumeType

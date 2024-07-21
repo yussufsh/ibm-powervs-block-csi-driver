@@ -1,5 +1,5 @@
 # IBM PowerVS Block CSI Driver
-CSI Driver for IBM® Power Systems™ Virtual Servers
+CSI Driver for IBM® Power Virtual Server. This driver supports both Public (off-prem) and Private (on-prem) Power Virtual Server environments.
 
 # Overview
 The IBM Power Virtual Systems Container Storage Interface (CSI) Driver provides a CSI interface used by Container Orchestrators to manage the lifecycle of Power Virtual System volumes.
@@ -8,7 +8,7 @@ The IBM Power Virtual Systems Container Storage Interface (CSI) Driver provides 
 # CSI Specification Compatibility Matrix
 | PowerVS CSI Driver | Kubernetes | CSI | Golang |
 | ----------------------------- | ----------- | -------- | -------- |
-| main | 1.29 | 1.9.0 | 1.21 |
+| main | 1.30 | 1.9.0 | 1.22 |
 | 0.6.0 | 1.29 | 1.9.0 | 1.21 |
 | 0.5.0 | 1.28 | 1.8.0 | 1.20 |
 | 0.4.0 | 1.26 | 1.7.0 | 1.19 |
@@ -76,7 +76,7 @@ Please see the compatibility matrix above before you deploy the driver
 
 To deploy the CSI driver:
 ```sh
-kubectl apply -k "https://github.com/kubernetes-sigs/ibm-powervs-block-csi-driver/deploy/kubernetes/overlays/stable/?ref=v0.3.0"
+kubectl apply -k "https://github.com/kubernetes-sigs/ibm-powervs-block-csi-driver/deploy/kubernetes/overlays/stable/?ref=v0.6.0"
 ```
 
 Verify driver is running:
@@ -87,7 +87,7 @@ kubectl get pods -n kube-system
 #### Deploy driver with debug mode
 To view driver debug logs, run the CSI driver with `-v=5` command line option
 
-To enable powervs debug logs, run the CSI driver with `debug=true` command line option.
+To enable PowerVS debug logs, run the CSI driver with `-debug=true` command line option.
 
 ## Examples
 Make sure you follow the [Prerequisites](README.md#Prerequisites) before the examples:

@@ -21,10 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/IBM-Cloud/power-go-client/clients/instance"
 	"github.com/IBM-Cloud/power-go-client/power/models"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
@@ -109,8 +111,8 @@ func (r *Remote) createImage(image string) error {
 	return nil
 }
 
-// If given network name is not found in the network list
-// create a new public network with the same name and use it
+// If given network name is not found in the network list,
+// create a new public network with the same name and use it.
 func (r *Remote) createPublicNetwork(network string) (string, error) {
 	nc := r.powervsClients.nc
 	netFound := ""
@@ -139,7 +141,7 @@ func (r *Remote) createPublicNetwork(network string) (string, error) {
 	return netFound, nil
 }
 
-// Generate a new SSH key pair and create a SSHKey using the pub key
+// Generate a new SSH key pair and create a SSHKey using the pub key.
 func (r *Remote) createSSHKey() error {
 	kc := r.powervsClients.kc
 	sshKey := r.resName
@@ -158,7 +160,7 @@ func (r *Remote) createSSHKey() error {
 	return err
 }
 
-// Create a pvm instance
+// Create a pvm instance.
 func (r *Remote) createInstance(image, network string) (string, string, error) {
 	ic := r.powervsClients.ic
 	name := r.resName
@@ -217,7 +219,7 @@ func (r *Remote) createInstance(image, network string) (string, string, error) {
 	return insID, publicIP, err
 }
 
-// Wait till VLAN is attached to the network
+// Wait till VLAN is attached to the network.
 func waitForNetworkVLAN(netID string, nc *instance.IBMPINetworkClient) (*models.Network, error) {
 	var network *models.Network
 	err := wait.PollUntilContextTimeout(context.Background(), 15*time.Second, 5*time.Minute, true, func(context.Context) (bool, error) {
@@ -238,7 +240,7 @@ func waitForNetworkVLAN(netID string, nc *instance.IBMPINetworkClient) (*models.
 	return network, err
 }
 
-// Wait for VM status is ACTIVE and VM Health status to be OK/Warning
+// Wait for VM status is ACTIVE and VM Health status to be OK/Warning.
 func waitForInstanceHealth(insID string, ic *instance.IBMPIInstanceClient) (*models.PVMInstance, error) {
 	var pvm *models.PVMInstance
 	err := wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 45*time.Minute, true, func(context.Context) (bool, error) {
@@ -267,26 +269,30 @@ func waitForInstanceHealth(insID string, ic *instance.IBMPIInstanceClient) (*mod
 	return pvm, err
 }
 
-// Wait till SSH test is complete
+// Wait till SSH test is complete.
 func waitForInstanceSSH(publicIP string) error {
 	err := wait.PollUntilContextTimeout(context.Background(), 20*time.Second, 30*time.Minute, true, func(context.Context) (bool, error) {
-		var err error
 		outp, err := runRemoteCommand(publicIP, "hostname")
-		klog.Infof("out: %s err: %v", outp, err)
-		if err != nil {
+		klog.Infof("out: %s, err: %v", outp, err)
+		if strings.Contains(outp, "Connection timed out") {
+			klog.Warningf("Ignoring SSH Connection timed out error")
 			return false, nil
+		}
+		if err != nil {
+			klog.Warningf("Unexpected SSH error: %v.", err)
+			return false, err
 		}
 		return true, nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to get ssh connection: %v", err)
+		return fmt.Errorf("failed to get SSH connection: %v", err)
 	}
 
-	return err
+	return nil
 }
 
-// Delete the VM and SSH key
+// Delete the VM and SSH key.
 func (r *Remote) destroyPVSResources() {
 	if r.powervsClients.ic == nil || r.powervsClients.kc == nil {
 		klog.Warning("failed to retrieve PowerVS instance and key clients, ignoring")

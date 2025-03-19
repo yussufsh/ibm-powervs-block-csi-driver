@@ -25,12 +25,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	gcfg "gopkg.in/gcfg.v1"
+
 	"k8s.io/klog/v2"
+
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/cloud"
 	"sigs.k8s.io/ibm-powervs-block-csi-driver/pkg/util"
 )
 
-// Supported access modes
+// Supported access modes.
 const (
 	SingleNodeWriter     = csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER
 	MultiNodeMultiWriter = csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER
@@ -38,15 +40,16 @@ const (
 )
 
 var (
-	// controllerCaps represents the capability of controller service
+	// controllerCaps represents the capability of controller service.
 	controllerCaps = []csi.ControllerServiceCapability_RPC_Type{
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 	}
 )
 
-// controllerService represents the controller service of CSI driver
+// controllerService represents the controller service of CSI driver.
 type controllerService struct {
 	cloud         cloud.Cloud
 	driverOptions *Options
@@ -72,8 +75,7 @@ var (
 	NewPowerVSCloudFunc = cloud.NewPowerVSCloud
 )
 
-// newControllerService creates a new controller service
-// it will print stack trace and osexit if failed to create the service
+// newControllerService creates a new controller service and prints stack trace and osexit if failed to create the service.
 func newControllerService(driverOptions *Options) controllerService {
 	var cloudInstanceId, zone string
 
@@ -90,7 +92,7 @@ func newControllerService(driverOptions *Options) controllerService {
 	} else if driverOptions.cloudconfig != "" {
 		var cloudConfig CloudConfig
 		config, err := os.Open(driverOptions.cloudconfig)
-		if nil != err {
+		if err != nil {
 			klog.Fatalf("Failed to get cloud config: %v", err)
 		}
 		defer config.Close()
@@ -128,7 +130,7 @@ func newControllerService(driverOptions *Options) controllerService {
 func (d *controllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("CreateVolume: called with args %+v", req)
 	volName := req.GetName()
-	if len(volName) == 0 {
+	if volName == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume name not provided")
 	}
 
@@ -172,6 +174,10 @@ func (d *controllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		VolumeType:    volumeType,
 	}
 
+	if req.GetVolumeContentSource() != nil {
+		return handleClone(d.cloud, req, volName, volSizeBytes, opts)
+	}
+
 	// check if disk exists
 	// disk exists only if previous createVolume request fails due to any network/tcp error
 	diskDetails, _ := d.cloud.GetDiskByName(volName)
@@ -185,20 +191,20 @@ func (d *controllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Disk already exists and not in expected state")
 		}
-		return newCreateVolumeResponse(diskDetails), nil
+		return newCreateVolumeResponse(diskDetails, req.VolumeContentSource), nil
 	}
 
 	disk, err := d.cloud.CreateDisk(volName, opts)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not create volume %q: %v", volName, err)
 	}
-	return newCreateVolumeResponse(disk), nil
+	return newCreateVolumeResponse(disk, req.VolumeContentSource), nil
 }
 
 func (d *controllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
 	klog.V(4).Infof("DeleteVolume: called with args: %+v", req)
 	volumeID := req.GetVolumeId()
-	if len(volumeID) == 0 {
+	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
@@ -224,7 +230,7 @@ func (d *controllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 func (d *controllerService) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume: called with args %+v", req)
 	volumeID := req.GetVolumeId()
-	if len(volumeID) == 0 {
+	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
@@ -234,7 +240,7 @@ func (d *controllerService) ControllerPublishVolume(ctx context.Context, req *cs
 	defer d.volumeLocks.Release(volumeID)
 
 	nodeID := req.GetNodeId()
-	if len(nodeID) == 0 {
+	if nodeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Node ID not provided")
 	}
 
@@ -286,7 +292,7 @@ func (d *controllerService) ControllerPublishVolume(ctx context.Context, req *cs
 func (d *controllerService) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume: called with args %+v", req)
 	volumeID := req.GetVolumeId()
-	if len(volumeID) == 0 {
+	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
@@ -296,7 +302,7 @@ func (d *controllerService) ControllerUnpublishVolume(ctx context.Context, req *
 	defer d.volumeLocks.Release(volumeID)
 
 	nodeID := req.GetNodeId()
-	if len(nodeID) == 0 {
+	if nodeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Node ID not provided")
 	}
 
@@ -322,7 +328,7 @@ func (d *controllerService) ControllerUnpublishVolume(ctx context.Context, req *
 
 func (d *controllerService) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	klog.V(4).Infof("ControllerGetCapabilities: called with args %+v", req)
-	var caps []*csi.ControllerServiceCapability
+	caps := make([]*csi.ControllerServiceCapability, 0, len(controllerCaps))
 	for _, cap := range controllerCaps {
 		c := &csi.ControllerServiceCapability{
 			Type: &csi.ControllerServiceCapability_Rpc{
@@ -349,7 +355,7 @@ func (d *controllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 func (d *controllerService) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	klog.V(4).Infof("ValidateVolumeCapabilities: called with args %+v", req)
 	volumeID := req.GetVolumeId()
-	if len(volumeID) == 0 {
+	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
@@ -377,7 +383,7 @@ func (d *controllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 func (d *controllerService) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	klog.V(4).Infof("ControllerExpandVolume: called with args %+v", req)
 	volumeID := req.GetVolumeId()
-	if len(volumeID) == 0 {
+	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
 
@@ -428,7 +434,7 @@ func isValidVolumeCapabilities(volCaps []*csi.VolumeCapability) bool {
 	return true
 }
 
-// Check if the volume is shareable
+// Check if the volume is shareable.
 func isShareableVolume(volCaps []*csi.VolumeCapability) bool {
 	for _, c := range volCaps {
 		mode := c.AccessMode.GetMode()
@@ -454,9 +460,7 @@ func (d *controllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func newCreateVolumeResponse(disk *cloud.Disk) *csi.CreateVolumeResponse {
-	var src *csi.VolumeContentSource
-
+func newCreateVolumeResponse(disk *cloud.Disk, src *csi.VolumeContentSource) *csi.CreateVolumeResponse {
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      disk.VolumeID,
@@ -494,4 +498,43 @@ func verifyVolumeDetails(payload *cloud.DiskOptions, diskDetails *cloud.Disk) er
 		return status.Errorf(codes.Internal, "capacityBytes in payload and capacityGIB in disk details don't match")
 	}
 	return nil
+}
+
+func handleClone(cloud cloud.Cloud, req *csi.CreateVolumeRequest, volName string, volSizeBytes int64, opts *cloud.DiskOptions) (*csi.CreateVolumeResponse, error) {
+	volumeSource := req.VolumeContentSource
+	switch volumeSource.Type.(type) {
+	case *csi.VolumeContentSource_Volume:
+		diskDetails, _ := cloud.GetDiskByNamePrefix("clone-" + req.GetName())
+		if diskDetails != nil {
+			err := verifyVolumeDetails(opts, diskDetails)
+			if err != nil {
+				return nil, err
+			}
+			return newCreateVolumeResponse(diskDetails, req.VolumeContentSource), nil
+		}
+		if srcVolume := volumeSource.GetVolume(); srcVolume != nil {
+			srcVolumeID := srcVolume.GetVolumeId()
+			diskDetails, err := cloud.GetDiskByID(srcVolumeID)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not get the source volume %q: %v", srcVolumeID, err)
+			}
+			if util.GiBToBytes(diskDetails.CapacityGiB) != volSizeBytes {
+				return nil, status.Errorf(codes.Internal, "Cannot clone volume %v, source volume size is not equal to the clone volume", srcVolumeID)
+			}
+			err = verifyVolumeDetails(opts, diskDetails)
+			if err != nil {
+				return nil, err
+			}
+			diskFromSourceVolume, err := cloud.CloneDisk(srcVolumeID, volName)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not clone volume %q: %v", volName, err)
+			}
+			cloneDiskDetails, err := cloud.GetDiskByID(diskFromSourceVolume.VolumeID)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not get volume %q after clone: %v", volName, err)
+			}
+			return newCreateVolumeResponse(cloneDiskDetails, req.VolumeContentSource), nil
+		}
+	}
+	return nil, status.Errorf(codes.InvalidArgument, "%v not a proper volume source", volumeSource)
 }

@@ -6,5 +6,6 @@ approvers:
 reviewers:
   - mkumatag
   - yussufsh
+  - kishen-v
 
 component: "Multi-Arch / IBM P and Z"
